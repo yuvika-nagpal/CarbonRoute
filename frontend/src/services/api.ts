@@ -121,64 +121,6 @@ const DEFAULT_PRESENTATIONS: PresentationVersion[] = [
     createdAt: '2026-08-17T10:00:00.000Z',
     publishedAt: '2026-08-17T10:00:00.000Z',
   },
-  {
-    id: 'pres-planning-v2',
-    title: 'CarbonRoute Planning Presentation V2',
-    deliverableType: 'planning',
-    versionTag: 'v2',
-    description: 'Iterative revision of the planning presentation incorporating instructor feedback and preliminary trace modeling results.',
-    fileName: 'CarbonRoute_Planning_Presentation_V2_Draft.pdf',
-    filePath: 'uploads/presentations/CarbonRoute_Planning_Presentation_V2_Draft.pdf',
-    fileSize: 124000,
-    mimeType: 'application/pdf',
-    fileUrl: `${BACKEND_URL}/api/storage/presentations/CarbonRoute_Planning_Presentation_V2_Draft.pdf`,
-    authors: ['Yuvika Nagpal', 'Kumkum Gupta', 'Aaneya Sabharwal'],
-    uploaderName: 'Team TriFlux',
-    status: 'draft',
-    presentationDate: '2026-08-24',
-    sha256Checksum: 'b7c2d9e1f3a5b4c6e8d0f2a4b6c8e0d2f4a6b8c0e2d4f6a8b0c2d4e6f8a0b2c4',
-    changeSummary: 'Draft revision V2 with updated trace schemas and calibration protocols.',
-    previousVersionId: 'pres-planning-v1',
-    createdAt: '2026-08-18T00:00:00.000Z',
-  },
-  {
-    id: 'pres-midterm-v1',
-    title: 'Mid-Sem Presentation',
-    deliverableType: 'midterm',
-    versionTag: 'midterm-v1',
-    description: 'Mid-semester milestone presentation reviewing discrete-event simulator implementation, baseline benchmarks, and empirical forecast error curves.',
-    fileName: '',
-    filePath: '',
-    fileSize: 0,
-    mimeType: 'application/pdf',
-    fileUrl: '',
-    authors: ['Yuvika Nagpal', 'Kumkum Gupta', 'Aaneya Sabharwal'],
-    uploaderName: 'Team TriFlux',
-    status: 'draft',
-    presentationDate: '2026-10-12',
-    sha256Checksum: '',
-    changeSummary: 'Scheduled mid-semester deliverable placeholder.',
-    createdAt: '2026-08-18T00:00:00.000Z',
-  },
-  {
-    id: 'pres-final-v1',
-    title: 'Final Presentation & Viva Defense',
-    deliverableType: 'final',
-    versionTag: 'final-v1',
-    description: 'End-of-semester final project deliverable, complete reproducible benchmark demonstration, Kubernetes containerized connector, and oral thesis defense.',
-    fileName: '',
-    filePath: '',
-    fileSize: 0,
-    mimeType: 'application/pdf',
-    fileUrl: '',
-    authors: ['Yuvika Nagpal', 'Kumkum Gupta', 'Aaneya Sabharwal'],
-    uploaderName: 'Team TriFlux',
-    status: 'draft',
-    presentationDate: '2026-12-21',
-    sha256Checksum: '',
-    changeSummary: 'Scheduled final presentation deliverable placeholder.',
-    createdAt: '2026-08-18T00:00:00.000Z',
-  },
 ];
 
 const DEFAULT_TEAM: TeamMember[] = [
@@ -333,25 +275,6 @@ const getHeaders = (isFormData: boolean = false): HeadersInit => {
   return headers;
 };
 
-const getLocalPresentations = (): PresentationVersion[] => {
-  try {
-    const saved = localStorage.getItem('carbonroute_presentations');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed.map(normalizePresentation);
-      }
-    }
-  } catch {}
-  return DEFAULT_PRESENTATIONS.map(normalizePresentation);
-};
-
-const saveLocalPresentations = (list: PresentationVersion[]) => {
-  try {
-    localStorage.setItem('carbonroute_presentations', JSON.stringify(list));
-  } catch {}
-};
-
 export const api = {
   // Auth
   async login(username: string, password: string): Promise<ApiResponse<{ token: string; user: User }>> {
@@ -361,53 +284,43 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
       });
-      if (res.ok) {
-        const json = await res.json();
-        if (json.success && json.token) {
-          localStorage.setItem('carbonroute_token', json.token);
-        }
+      const json = await res.json().catch(() => null);
+      if (res.ok && json && json.success && json.token) {
+        localStorage.setItem('carbonroute_token', json.token);
         return json;
       }
-    } catch {}
-
-    // Standalone fallback: verify against standard credentials
-    if ((username === 'admin' || username === 'admin@carbonroute.org') && password === 'CarbonRoute2026!Secure') {
-      const user: User = {
-        id: 'usr-admin-1',
-        username: 'admin',
-        email: 'admin@carbonroute.org',
-        role: 'admin',
-      };
-      const token = 'mock-jwt-token-triflux-2026';
-      localStorage.setItem('carbonroute_token', token);
       return {
-        success: true,
-        message: 'Login successful',
-        data: { token, user },
-        user,
-        token,
+        success: false,
+        message: json?.message || `Authentication failed (HTTP ${res.status}: ${res.statusText})`,
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        message: err.message || 'Unable to connect to the backend authentication server.',
       };
     }
-    return { success: false, message: 'Invalid username or password.' };
   },
 
   async getMe(): Promise<ApiResponse<User>> {
+    const token = localStorage.getItem('carbonroute_token');
+    if (!token) {
+      return { success: false, message: 'No authentication token found.' };
+    }
+
     try {
       const res = await fetch(`${API_BASE}/auth/me`, { headers: getHeaders() });
-      if (res.ok) return await res.json();
+      const json = await res.json().catch(() => null);
+      if (res.ok && json && json.success && json.user) {
+        return {
+          success: true,
+          user: json.user,
+          data: json.user,
+        };
+      }
     } catch {}
 
-    const token = localStorage.getItem('carbonroute_token');
-    if (token) {
-      const user: User = {
-        id: 'usr-admin-1',
-        username: 'admin',
-        email: 'admin@carbonroute.org',
-        role: 'admin',
-      };
-      return { success: true, user, data: user };
-    }
-    return { success: false, message: 'Not authenticated' };
+    localStorage.removeItem('carbonroute_token');
+    return { success: false, message: 'Session expired. Please log in again.' };
   },
 
   async logout(): Promise<ApiResponse<void>> {
@@ -431,8 +344,10 @@ export const api = {
           };
         }
       }
-    } catch {}
-    return { success: true, data: getLocalPresentations() };
+    } catch (err) {
+      console.error('Failed to fetch presentations from backend:', err);
+    }
+    return { success: true, data: DEFAULT_PRESENTATIONS.map(normalizePresentation) };
   },
 
   async getAllVersions(): Promise<ApiResponse<PresentationVersion[]>> {
@@ -440,15 +355,17 @@ export const api = {
       const res = await fetch(`${API_BASE}/presentations/versions`, { headers: getHeaders() });
       if (res.ok) {
         const json = await res.json();
-        if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+        if (json.success && Array.isArray(json.data)) {
           return {
             ...json,
             data: json.data.map(normalizePresentation),
           };
         }
       }
-    } catch {}
-    return { success: true, data: getLocalPresentations() };
+    } catch (err) {
+      console.error('Failed to fetch presentation versions from backend:', err);
+    }
+    return { success: true, data: DEFAULT_PRESENTATIONS.map(normalizePresentation) };
   },
 
   async getPresentationByVersion(versionTag: string): Promise<ApiResponse<PresentationVersion>> {
@@ -465,11 +382,13 @@ export const api = {
           };
         }
       }
-    } catch {}
+    } catch (err) {
+      console.error(`Failed to fetch presentation version "${versionTag}" from backend:`, err);
+    }
 
-    const list = getLocalPresentations();
     const found =
-      list.find((p) => p.versionTag.toLowerCase() === versionTag.toLowerCase()) || list[1];
+      DEFAULT_PRESENTATIONS.find((p) => p.versionTag.toLowerCase() === versionTag.toLowerCase()) ||
+      DEFAULT_PRESENTATIONS[1];
     return { success: true, data: normalizePresentation(found) };
   },
 
@@ -480,55 +399,23 @@ export const api = {
         headers: getHeaders(true),
         body: formData,
       });
-      if (res.ok) {
-        const json = await res.json();
-        if (json.success && json.data) {
-          return {
-            ...json,
-            data: normalizePresentation(json.data),
-          };
-        }
+      const json = await res.json().catch(() => null);
+      if (res.ok && json && json.success && json.data) {
+        return {
+          ...json,
+          data: normalizePresentation(json.data),
+        };
       }
-    } catch {}
-
-    const title = (formData.get('title') as string) || 'New Uploaded Presentation';
-    const versionTag = (formData.get('versionTag') as string) || `v${Date.now()}`;
-    const desc = (formData.get('description') as string) || '';
-    const date = (formData.get('presentationDate') as string) || new Date().toISOString().split('T')[0];
-    const authors = ((formData.get('authors') as string) || 'Team TriFlux')
-      .split(',')
-      .map((a) => a.trim())
-      .filter(Boolean);
-
-    const file = formData.get('file') as File | null;
-    const fileName = file ? file.name : 'CarbonRoute_Planning_Presentation_V1.pdf';
-
-    const newVersion: PresentationVersion = normalizePresentation({
-      id: `pres-${Date.now()}`,
-      title,
-      deliverableType: 'other',
-      versionTag,
-      description: desc,
-      fileName,
-      filePath: `uploads/presentations/${fileName}`,
-      fileSize: file ? file.size : 28033,
-      mimeType: file ? file.type : 'application/pdf',
-      fileUrl: `${BACKEND_URL}/api/storage/presentations/${fileName}`,
-      authors,
-      uploaderName: 'Team TriFlux',
-      status: 'published',
-      presentationDate: date,
-      sha256Checksum: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-      changeSummary: 'Uploaded via Admin Panel.',
-      createdAt: new Date().toISOString(),
-      publishedAt: new Date().toISOString(),
-    });
-
-    const current = getLocalPresentations();
-    const updated = [newVersion, ...current];
-    saveLocalPresentations(updated);
-
-    return { success: true, data: newVersion };
+      return {
+        success: false,
+        message: json?.message || `Server upload failed (HTTP ${res.status}: ${res.statusText})`,
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        message: err.message || 'Network error connecting to backend API.',
+      };
+    }
   },
 
   async updatePresentationVersion(
@@ -536,44 +423,50 @@ export const api = {
     updates: Partial<PresentationVersion>
   ): Promise<ApiResponse<PresentationVersion>> {
     try {
-      const res = await fetch(`${API_BASE}/presentations/versions/${id}`, {
+      const res = await fetch(`${API_BASE}/presentations/versions/${encodeURIComponent(id)}`, {
         method: 'PUT',
         headers: getHeaders(),
         body: JSON.stringify(updates),
       });
-      if (res.ok) {
-        const json = await res.json();
-        if (json.success && json.data) {
-          return {
-            ...json,
-            data: normalizePresentation(json.data),
-          };
-        }
+      const json = await res.json().catch(() => null);
+      if (res.ok && json && json.success && json.data) {
+        return {
+          ...json,
+          data: normalizePresentation(json.data),
+        };
       }
-    } catch {}
-
-    const current = getLocalPresentations();
-    const idx = current.findIndex((p) => p.id === id);
-    if (idx !== -1) {
-      current[idx] = normalizePresentation({ ...current[idx], ...updates });
-      saveLocalPresentations(current);
-      return { success: true, data: current[idx] };
+      return {
+        success: false,
+        message: json?.message || `Failed to update presentation (HTTP ${res.status})`,
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        message: err.message || 'Network error connecting to backend API.',
+      };
     }
-    return { success: false, message: 'Item not found' };
   },
 
   async deletePresentationVersion(id: string): Promise<ApiResponse<void>> {
     try {
-      const res = await fetch(`${API_BASE}/presentations/versions/${id}`, {
+      const res = await fetch(`${API_BASE}/presentations/versions/${encodeURIComponent(id)}`, {
         method: 'DELETE',
         headers: getHeaders(),
       });
-      if (res.ok) return await res.json();
-    } catch {}
-
-    const current = getLocalPresentations().filter((p) => p.id !== id);
-    saveLocalPresentations(current);
-    return { success: true };
+      const json = await res.json().catch(() => null);
+      if (res.ok && json && json.success) {
+        return json;
+      }
+      return {
+        success: false,
+        message: json?.message || `Failed to delete presentation (HTTP ${res.status})`,
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        message: err.message || 'Network error connecting to backend API.',
+      };
+    }
   },
 
   // Resources

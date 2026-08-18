@@ -15,8 +15,7 @@ export const getPresentations = (req: Request, res: Response) => {
 };
 
 export const getAllVersions = (req: AuthRequest, res: Response) => {
-  const isAdmin = req.user && req.user.role === 'admin';
-  const presentations = db.getPresentations(isAdmin);
+  const presentations = db.getPresentations(true);
 
   return res.json({
     success: true,
