@@ -348,7 +348,7 @@ export const api = {
 
   async getAllVersions(): Promise<ApiResponse<PresentationVersion[]>> {
     try {
-      const res = await fetch(`${API_BASE}/presentations/versions`, { headers: getHeaders() });
+      const res = await fetch(`${API_BASE}/presentations`, { headers: getHeaders() });
       if (res.ok) {
         const json = await res.json();
         if (json.success && Array.isArray(json.data) && json.data.length > 0) {
