@@ -9,11 +9,13 @@ import apiRouter from './routes/api';
 
 const app = express();
 
-// Security Headers with allowance for PDF preview frames and storage streaming
+// Security Headers with allowance for cross-origin PDF preview frames and storage streaming
 app.use(
   helmet({
+    frameguard: false, // Allows PDF to be embedded in iframes on Vercel
     crossOriginResourcePolicy: { policy: 'cross-origin' },
-    contentSecurityPolicy: false, // Disabled in dev/mixed preview mode to allow embedded iframe PDF views
+    crossOriginEmbedderPolicy: false,
+    contentSecurityPolicy: false, // Allows embedded iframe PDF views across domains
   })
 );
 

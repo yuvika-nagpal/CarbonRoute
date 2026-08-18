@@ -19,6 +19,12 @@ export const serveFile = async (req: Request, res: Response) => {
       res.setHeader('Content-Length', fileSize.toString());
     }
 
+    // Explicitly allow cross-origin embedding for PDF previews in iframes
+    res.removeHeader('X-Frame-Options');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+
     if (req.query.download === 'true') {
       res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
     } else {

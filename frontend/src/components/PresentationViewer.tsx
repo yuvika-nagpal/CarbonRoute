@@ -37,10 +37,16 @@ export const PresentationViewer: React.FC<PresentationViewerProps> = ({
   onSelectVersion,
 }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [viewerMode, setViewerMode] = useState<'native' | 'gdocs'>('native');
 
   const resolvedPdfUrl = resolveFileUrl(version.fileUrl, version.filePath, version.fileName);
   const hasFile = Boolean(resolvedPdfUrl || version.fileName);
   const pdfSource = resolvedPdfUrl || resolveFileUrl('CarbonRoute_Planning_Presentation_V1.pdf');
+
+  const activeEmbedUrl =
+    viewerMode === 'gdocs'
+      ? `https://docs.google.com/viewer?url=${encodeURIComponent(pdfSource)}&embedded=true`
+      : `${pdfSource}#toolbar=1&navpanes=1&scrollbar=1`;
 
   const handleDownload = () => {
     if (!pdfSource) return;
@@ -168,27 +174,59 @@ export const PresentationViewer: React.FC<PresentationViewerProps> = ({
       {/* 2. MAIN PRESENTATION VIEWER */}
       {hasFile ? (
         <div className="glass-card rounded-2xl border border-slate-800 overflow-hidden shadow-2xl space-y-3 p-4">
-          <div className="flex items-center justify-between px-2 text-xs font-mono text-slate-400">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-2 text-xs font-mono text-slate-400">
             <div className="flex items-center space-x-2">
               <FileText className="w-4 h-4 text-emerald-400" />
               <span className="text-white font-semibold">{version.fileName || 'Presentation Document'}</span>
             </div>
-            <a
-              href={pdfSource}
-              target="_blank"
-              rel="noreferrer"
-              className="text-emerald-400 hover:underline flex items-center space-x-1"
-            >
-              <span>Open in New Tab</span>
-              <ExternalLink className="w-3 h-3" />
-            </a>
+
+            <div className="flex items-center space-x-3">
+              {/* Viewer Engine Toggle */}
+              <div className="inline-flex items-center rounded-lg bg-slate-900 p-0.5 border border-slate-800 text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => setViewerMode('native')}
+                  className={`px-2 py-1 rounded transition-colors ${
+                    viewerMode === 'native'
+                      ? 'bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/40'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Use native browser PDF viewer"
+                >
+                  Direct PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewerMode('gdocs')}
+                  className={`px-2 py-1 rounded transition-colors ${
+                    viewerMode === 'gdocs'
+                      ? 'bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/40'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Use Google Docs online document viewer"
+                >
+                  Cloud Viewer
+                </button>
+              </div>
+
+              <a
+                href={pdfSource}
+                target="_blank"
+                rel="noreferrer"
+                className="text-emerald-400 hover:underline flex items-center space-x-1"
+              >
+                <span>Open in New Tab</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
           </div>
 
           <div className="relative rounded-xl overflow-hidden border border-slate-800 bg-slate-950">
             <iframe
-              src={`${pdfSource}#toolbar=1&navpanes=1&scrollbar=1`}
+              src={activeEmbedUrl}
               title={version.title}
               className="w-full h-[650px] rounded-xl bg-slate-950"
+              allow="autoplay"
             />
           </div>
         </div>
