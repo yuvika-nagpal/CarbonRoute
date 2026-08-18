@@ -15,6 +15,7 @@ import {
   Info,
 } from 'lucide-react';
 import { PresentationItem } from '../types';
+import { resolveFileUrl } from '../services/api';
 
 interface PresentationViewerProps {
   version: PresentationItem;
@@ -37,13 +38,20 @@ export const PresentationViewer: React.FC<PresentationViewerProps> = ({
 }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  const hasFile = Boolean(version.fileUrl || version.fileName);
-  const pdfSource = version.fileUrl || '/CarbonRoute_Planning_Presentation_V1.pdf';
+  const resolvedPdfUrl = resolveFileUrl(version.fileUrl, version.filePath, version.fileName);
+  const hasFile = Boolean(resolvedPdfUrl || version.fileName);
+  const pdfSource = resolvedPdfUrl || resolveFileUrl('CarbonRoute_Planning_Presentation_V1.pdf');
 
   const handleDownload = () => {
+    if (!pdfSource) return;
+    const downloadUrl = pdfSource.includes('?')
+      ? `${pdfSource}&download=true`
+      : `${pdfSource}?download=true`;
     const link = document.createElement('a');
-    link.href = `${pdfSource}?download=true`;
+    link.href = downloadUrl;
     link.setAttribute('download', version.fileName || `${version.title.replace(/\s+/g, '_')}.pdf`);
+    link.setAttribute('target', '_blank');
+    link.setAttribute('rel', 'noreferrer');
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

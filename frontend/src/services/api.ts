@@ -9,7 +9,76 @@ import {
   User,
 } from '../types';
 
-const API_BASE = 'https://carbonroute.onrender.com/api';
+export const BACKEND_URL =
+  ((import.meta as any).env?.VITE_API_URL as string)?.replace(/\/api\/?$/, '') ||
+  'https://carbonroute.onrender.com';
+
+export const API_BASE = `${BACKEND_URL}/api`;
+
+/**
+ * Resolves presentation and resource file paths/URLs against the production backend.
+ * Ensures consistent handling of relative fileUrl, filePath (e.g. uploads/presentations/...),
+ * and standalone fileNames on both Vercel and local environments.
+ */
+export const resolveFileUrl = (
+  fileUrl?: string,
+  filePath?: string,
+  fileName?: string
+): string => {
+  const url = (fileUrl || '').trim();
+  const path = (filePath || '').trim();
+  const name = (fileName || '').trim();
+
+  // If no file reference exists at all
+  if (!url && !path && !name) {
+    return '';
+  }
+
+  // If already an absolute HTTP/HTTPS URL
+  if (/^https?:\/\//i.test(url)) {
+    return url;
+  }
+
+  // If fileUrl starts with /api/storage/
+  if (url.startsWith('/api/storage/')) {
+    return `${BACKEND_URL}${url}`;
+  }
+
+  // If filePath starts with uploads/ (standard backend storage relative path)
+  if (path.startsWith('uploads/')) {
+    const relative = path.replace(/^uploads\//, '');
+    return `${BACKEND_URL}/api/storage/${relative}`;
+  }
+
+  // If filePath starts with /uploads/
+  if (path.startsWith('/uploads/')) {
+    const relative = path.replace(/^\/uploads\//, '');
+    return `${BACKEND_URL}/api/storage/${relative}`;
+  }
+
+  // If fileName is provided (e.g. CarbonRoute_Planning_Presentation_V1.pdf)
+  if (name) {
+    const cleanName = name.replace(/^(\/|uploads\/presentations\/|uploads\/)/, '');
+    return `${BACKEND_URL}/api/storage/presentations/${cleanName}`;
+  }
+
+  // If fileUrl is like /CarbonRoute_Planning_Presentation_V1.pdf
+  if (url) {
+    const cleanUrl = url.replace(/^\//, '');
+    return `${BACKEND_URL}/api/storage/presentations/${cleanUrl}`;
+  }
+
+  return '';
+};
+
+// Helper to normalize presentation version URLs
+export const normalizePresentation = (p: PresentationVersion): PresentationVersion => {
+  const resolvedUrl = resolveFileUrl(p.fileUrl, p.filePath, p.fileName);
+  return {
+    ...p,
+    fileUrl: resolvedUrl,
+  };
+};
 
 const DEFAULT_PRESENTATIONS: PresentationVersion[] = [
   {
@@ -19,10 +88,10 @@ const DEFAULT_PRESENTATIONS: PresentationVersion[] = [
     versionTag: 'v1',
     description: 'Official Software Engineering UCS503 curriculum project grid and milestone roadmap overview.',
     fileName: 'CarbonRoute_Software_Grid.pdf',
-    filePath: 'CarbonRoute_Software_Grid.pdf',
+    filePath: 'uploads/presentations/CarbonRoute_Software_Grid.pdf',
     fileSize: 45200,
     mimeType: 'application/pdf',
-    fileUrl: '/CarbonRoute_Planning_Presentation_V1.pdf',
+    fileUrl: `${BACKEND_URL}/api/storage/presentations/CarbonRoute_Software_Grid.pdf`,
     authors: ['Yuvika Nagpal (1024030141)', 'Kumkum Gupta (1024030144)', 'Aaneya Sabharwal (1024030147)'],
     uploaderName: 'Team TriFlux (Batch: 3C15)',
     status: 'published',
@@ -39,10 +108,10 @@ const DEFAULT_PRESENTATIONS: PresentationVersion[] = [
     versionTag: 'v1',
     description: 'UCS503: CarbonRoute — Uncertainty-Aware Carbon-Aware Batch Scheduling. Official 25-slide presentation by Team TriFlux submitted to Sukhpal Singh. Covers problem statement, research gap, scope, target users, system architecture, uncertainty modelling, deadline risk calibration, benchmark scale, Gantt chart milestones and team responsibilities.',
     fileName: 'CarbonRoute_Planning_Presentation_V1.pdf',
-    filePath: 'CarbonRoute_Planning_Presentation_V1.pdf',
+    filePath: 'uploads/presentations/CarbonRoute_Planning_Presentation_V1.pdf',
     fileSize: 28033,
     mimeType: 'application/pdf',
-    fileUrl: '/CarbonRoute_Planning_Presentation_V1.pdf',
+    fileUrl: `${BACKEND_URL}/api/storage/presentations/CarbonRoute_Planning_Presentation_V1.pdf`,
     authors: ['Yuvika Nagpal (1024030141)', 'Kumkum Gupta (1024030144)', 'Aaneya Sabharwal (1024030147)'],
     uploaderName: 'Team TriFlux (Batch: 3C15)',
     status: 'published',
@@ -59,10 +128,10 @@ const DEFAULT_PRESENTATIONS: PresentationVersion[] = [
     versionTag: 'v2',
     description: 'Iterative revision of the planning presentation incorporating instructor feedback and preliminary trace modeling results.',
     fileName: 'CarbonRoute_Planning_Presentation_V2_Draft.pdf',
-    filePath: 'CarbonRoute_Planning_Presentation_V2_Draft.pdf',
+    filePath: 'uploads/presentations/CarbonRoute_Planning_Presentation_V2_Draft.pdf',
     fileSize: 124000,
     mimeType: 'application/pdf',
-    fileUrl: '/CarbonRoute_Planning_Presentation_V1.pdf',
+    fileUrl: `${BACKEND_URL}/api/storage/presentations/CarbonRoute_Planning_Presentation_V2_Draft.pdf`,
     authors: ['Yuvika Nagpal', 'Kumkum Gupta', 'Aaneya Sabharwal'],
     uploaderName: 'Team TriFlux',
     status: 'draft',
@@ -267,9 +336,14 @@ const getHeaders = (isFormData: boolean = false): HeadersInit => {
 const getLocalPresentations = (): PresentationVersion[] => {
   try {
     const saved = localStorage.getItem('carbonroute_presentations');
-    if (saved) return JSON.parse(saved);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.map(normalizePresentation);
+      }
+    }
   } catch {}
-  return DEFAULT_PRESENTATIONS;
+  return DEFAULT_PRESENTATIONS.map(normalizePresentation);
 };
 
 const saveLocalPresentations = (list: PresentationVersion[]) => {
@@ -288,10 +362,15 @@ export const api = {
         body: JSON.stringify({ username, password }),
       });
       if (res.ok) {
-        return await res.json();
+        const json = await res.json();
+        if (json.success && json.token) {
+          localStorage.setItem('carbonroute_token', json.token);
+        }
+        return json;
       }
     } catch {}
 
+    // Standalone fallback: verify against standard credentials
     if ((username === 'admin' || username === 'admin@carbonroute.org') && password === 'CarbonRoute2026!Secure') {
       const user: User = {
         id: 'usr-admin-1',
@@ -299,12 +378,14 @@ export const api = {
         email: 'admin@carbonroute.org',
         role: 'admin',
       };
+      const token = 'mock-jwt-token-triflux-2026';
+      localStorage.setItem('carbonroute_token', token);
       return {
         success: true,
         message: 'Login successful',
-        data: { token: 'mock-jwt-token-triflux-2026', user },
+        data: { token, user },
         user,
-        token: 'mock-jwt-token-triflux-2026',
+        token,
       };
     }
     return { success: false, message: 'Invalid username or password.' };
@@ -341,18 +422,29 @@ export const api = {
   async getPresentations(): Promise<ApiResponse<Presentation[]>> {
     try {
       const res = await fetch(`${API_BASE}/presentations`, { headers: getHeaders() });
-      if (res.ok) return await res.json();
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          return {
+            ...json,
+            data: json.data.map(normalizePresentation),
+          };
+        }
+      }
     } catch {}
-    return { success: true, data: [] };
+    return { success: true, data: getLocalPresentations() };
   },
 
   async getAllVersions(): Promise<ApiResponse<PresentationVersion[]>> {
     try {
-      const res = await fetch(`${API_BASE}/presentations`, { headers: getHeaders() });
+      const res = await fetch(`${API_BASE}/presentations/versions`, { headers: getHeaders() });
       if (res.ok) {
         const json = await res.json();
         if (json.success && Array.isArray(json.data) && json.data.length > 0) {
-          return json;
+          return {
+            ...json,
+            data: json.data.map(normalizePresentation),
+          };
         }
       }
     } catch {}
@@ -366,13 +458,19 @@ export const api = {
       });
       if (res.ok) {
         const json = await res.json();
-        if (json.success && json.data) return json;
+        if (json.success && json.data) {
+          return {
+            ...json,
+            data: normalizePresentation(json.data),
+          };
+        }
       }
     } catch {}
 
     const list = getLocalPresentations();
-    const found = list.find((p) => p.versionTag.toLowerCase() === versionTag.toLowerCase()) || list[1];
-    return { success: true, data: found };
+    const found =
+      list.find((p) => p.versionTag.toLowerCase() === versionTag.toLowerCase()) || list[1];
+    return { success: true, data: normalizePresentation(found) };
   },
 
   async uploadPresentationVersion(formData: FormData): Promise<ApiResponse<PresentationVersion>> {
@@ -382,7 +480,15 @@ export const api = {
         headers: getHeaders(true),
         body: formData,
       });
-      if (res.ok) return await res.json();
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data) {
+          return {
+            ...json,
+            data: normalizePresentation(json.data),
+          };
+        }
+      }
     } catch {}
 
     const title = (formData.get('title') as string) || 'New Uploaded Presentation';
@@ -394,17 +500,20 @@ export const api = {
       .map((a) => a.trim())
       .filter(Boolean);
 
-    const newVersion: PresentationVersion = {
+    const file = formData.get('file') as File | null;
+    const fileName = file ? file.name : 'CarbonRoute_Planning_Presentation_V1.pdf';
+
+    const newVersion: PresentationVersion = normalizePresentation({
       id: `pres-${Date.now()}`,
       title,
       deliverableType: 'other',
       versionTag,
       description: desc,
-      fileName: 'Presentation.pdf',
-      filePath: 'CarbonRoute_Planning_Presentation_V1.pdf',
-      fileSize: 28033,
-      mimeType: 'application/pdf',
-      fileUrl: '/CarbonRoute_Planning_Presentation_V1.pdf',
+      fileName,
+      filePath: `uploads/presentations/${fileName}`,
+      fileSize: file ? file.size : 28033,
+      mimeType: file ? file.type : 'application/pdf',
+      fileUrl: `${BACKEND_URL}/api/storage/presentations/${fileName}`,
       authors,
       uploaderName: 'Team TriFlux',
       status: 'published',
@@ -413,7 +522,7 @@ export const api = {
       changeSummary: 'Uploaded via Admin Panel.',
       createdAt: new Date().toISOString(),
       publishedAt: new Date().toISOString(),
-    };
+    });
 
     const current = getLocalPresentations();
     const updated = [newVersion, ...current];
@@ -422,20 +531,31 @@ export const api = {
     return { success: true, data: newVersion };
   },
 
-  async updatePresentationVersion(id: string, updates: Partial<PresentationVersion>): Promise<ApiResponse<PresentationVersion>> {
+  async updatePresentationVersion(
+    id: string,
+    updates: Partial<PresentationVersion>
+  ): Promise<ApiResponse<PresentationVersion>> {
     try {
       const res = await fetch(`${API_BASE}/presentations/versions/${id}`, {
         method: 'PUT',
         headers: getHeaders(),
         body: JSON.stringify(updates),
       });
-      if (res.ok) return await res.json();
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data) {
+          return {
+            ...json,
+            data: normalizePresentation(json.data),
+          };
+        }
+      }
     } catch {}
 
     const current = getLocalPresentations();
     const idx = current.findIndex((p) => p.id === id);
     if (idx !== -1) {
-      current[idx] = { ...current[idx], ...updates };
+      current[idx] = normalizePresentation({ ...current[idx], ...updates });
       saveLocalPresentations(current);
       return { success: true, data: current[idx] };
     }
@@ -458,18 +578,68 @@ export const api = {
 
   // Resources
   async getResources(category?: string): Promise<ApiResponse<Resource[]>> {
+    try {
+      const query = category && category !== 'all' ? `?category=${encodeURIComponent(category)}` : '';
+      const res = await fetch(`${API_BASE}/resources${query}`, { headers: getHeaders() });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          return {
+            ...json,
+            data: json.data.map((r: Resource) => ({
+              ...r,
+              fileUrl: resolveFileUrl(r.fileUrl, r.filePath, r.fileName),
+            })),
+          };
+        }
+      }
+    } catch {}
     return { success: true, data: [] };
   },
 
   async getAllResourcesAdmin(): Promise<ApiResponse<Resource[]>> {
+    try {
+      const res = await fetch(`${API_BASE}/resources/all`, { headers: getHeaders() });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          return {
+            ...json,
+            data: json.data.map((r: Resource) => ({
+              ...r,
+              fileUrl: resolveFileUrl(r.fileUrl, r.filePath, r.fileName),
+            })),
+          };
+        }
+      }
+    } catch {}
     return { success: true, data: [] };
   },
 
   async uploadResource(formData?: FormData): Promise<ApiResponse<Resource>> {
+    try {
+      if (formData) {
+        const res = await fetch(`${API_BASE}/resources/upload`, {
+          method: 'POST',
+          headers: getHeaders(true),
+          body: formData,
+        });
+        if (res.ok) return await res.json();
+      }
+    } catch {}
     return { success: true, data: {} as Resource };
   },
 
   async deleteResource(id?: string): Promise<ApiResponse<void>> {
+    try {
+      if (id) {
+        const res = await fetch(`${API_BASE}/resources/${id}`, {
+          method: 'DELETE',
+          headers: getHeaders(),
+        });
+        if (res.ok) return await res.json();
+      }
+    } catch {}
     return { success: true };
   },
 
@@ -501,6 +671,18 @@ export const api = {
 
   // Feasibility Simulation API
   async simulateFeasibility(durationHours: number, deadlineHours: number, riskTolerance: number): Promise<ApiResponse<FeasibilityResult>> {
+    try {
+      const res = await fetch(`${API_BASE}/scheduler/simulate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ durationHours, deadlineHours, riskTolerance }),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data) return json;
+      }
+    } catch {}
+
     return {
       success: true,
       data: {

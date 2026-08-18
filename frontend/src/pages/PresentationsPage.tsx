@@ -13,7 +13,7 @@ import {
   Clock,
   User,
 } from 'lucide-react';
-import { api } from '../services/api';
+import { api, resolveFileUrl } from '../services/api';
 import { PresentationItem } from '../types';
 
 export const PresentationsPage: React.FC = () => {
@@ -42,7 +42,7 @@ export const PresentationsPage: React.FC = () => {
             filePath: 'uploads/presentations/CarbonRoute_Software_Grid.pdf',
             fileSize: 45200,
             mimeType: 'application/pdf',
-            fileUrl: '/api/storage/presentations/CarbonRoute_Software_Grid.pdf',
+            fileUrl: resolveFileUrl('/api/storage/presentations/CarbonRoute_Software_Grid.pdf', 'uploads/presentations/CarbonRoute_Software_Grid.pdf', 'CarbonRoute_Software_Grid.pdf'),
             authors: ['Yuvika Nagpal', 'Kumkum Gupta', 'Aaneya Sabharwal'],
             uploaderName: 'CarbonRoute Team',
             status: 'published',
@@ -59,9 +59,9 @@ export const PresentationsPage: React.FC = () => {
             description: 'Official Planning Presentation for Software Engineering (UCS503), submitted to Sukhpal Singh. Defines problem statement, core research question, baseline policies, forecast uncertainty modeling, deadline-risk formulation, and 17-week roadmap.',
             fileName: 'CarbonRoute_Planning_Presentation_V1.pdf',
             filePath: 'uploads/presentations/CarbonRoute_Planning_Presentation_V1.pdf',
-            fileSize: 118400,
+            fileSize: 28033,
             mimeType: 'application/pdf',
-            fileUrl: '/api/storage/presentations/CarbonRoute_Planning_Presentation_V1.pdf',
+            fileUrl: resolveFileUrl('/api/storage/presentations/CarbonRoute_Planning_Presentation_V1.pdf', 'uploads/presentations/CarbonRoute_Planning_Presentation_V1.pdf', 'CarbonRoute_Planning_Presentation_V1.pdf'),
             authors: ['Yuvika Nagpal', 'Kumkum Gupta', 'Aaneya Sabharwal'],
             uploaderName: 'CarbonRoute Team',
             status: 'published',

@@ -11,7 +11,7 @@ import {
   ShieldCheck,
   RefreshCw,
 } from 'lucide-react';
-import { api } from '../services/api';
+import { api, resolveFileUrl } from '../services/api';
 import { Resource } from '../types';
 
 export const ResourcesPage: React.FC = () => {
@@ -47,9 +47,12 @@ export const ResourcesPage: React.FC = () => {
   ];
 
   const handleDownload = (res: Resource) => {
+    const fileUrl = resolveFileUrl(res.fileUrl, res.filePath, res.fileName);
     const link = document.createElement('a');
-    link.href = `${res.fileUrl}?download=true`;
+    link.href = fileUrl.includes('?') ? `${fileUrl}&download=true` : `${fileUrl}?download=true`;
     link.setAttribute('download', res.fileName);
+    link.setAttribute('target', '_blank');
+    link.setAttribute('rel', 'noreferrer');
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
