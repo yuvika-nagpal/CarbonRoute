@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+    container_name: carbonroute-backend
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - NODE_ENV=production
+      - PORT=5000
+      - STORAGE_TYPE=local
+      - JWT_SECRET=carbonroute_docker_production_jwt_secret_2026
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=CarbonRoute2026!Secure
+    volumes:
+      - ../storage/uploads:/app/storage/uploads
+      - ../database:/app/database
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.frontend
+    container_name: carbonroute-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend

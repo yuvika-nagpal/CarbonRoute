@@ -1,0 +1,90 @@
+import { Router } from 'express';
+import { login, getMe, logout } from '../controllers/authController';
+import {
+  getPresentations,
+  getAllVersions,
+  getPresentationByVersion,
+  createPresentationVersion,
+  updatePresentationVersion,
+  deletePresentationVersion,
+} from '../controllers/presentationController';
+import {
+  getResources,
+  getAllResourcesAdmin,
+  createResource,
+  deleteResource,
+} from '../controllers/resourceController';
+import { getTeam, updateTeamMember } from '../controllers/teamController';
+import { getRoadmap, updateRoadmapMilestone } from '../controllers/roadmapController';
+import { serveFile } from '../controllers/storageController';
+import { simulateFeasibilityDecision } from '../controllers/schedulerController';
+import { authenticateToken, requireAdmin, optionalAuth } from '../middleware/auth';
+import { uploadMiddleware } from '../middleware/upload';
+import { db } from '../models/db';
+
+const router = Router();
+
+// Health Check
+router.get('/health', (_req, res) => {
+  res.json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    version: '1.0.0',
+    service: 'CarbonRoute Platform Backend',
+  });
+});
+
+// Storage File Serving / Download
+router.get('/storage/:category/:fileName', serveFile);
+
+// Authentication Routes
+router.post('/auth/login', login);
+router.post('/auth/logout', optionalAuth, logout);
+router.get('/auth/me', authenticateToken, getMe);
+
+// Presentations & Versioning Routes
+router.get('/presentations', getPresentations);
+router.get('/presentations/versions', optionalAuth, getAllVersions);
+router.get('/presentations/v/:versionTag', getPresentationByVersion);
+router.post(
+  '/presentations/upload',
+  authenticateToken,
+  requireAdmin,
+  uploadMiddleware.single('file'),
+  createPresentationVersion
+);
+router.put('/presentations/versions/:id', authenticateToken, requireAdmin, updatePresentationVersion);
+router.delete('/presentations/versions/:id', authenticateToken, requireAdmin, deletePresentationVersion);
+
+// Resources Library Routes
+router.get('/resources', getResources);
+router.get('/resources/all', authenticateToken, requireAdmin, getAllResourcesAdmin);
+router.post(
+  '/resources/upload',
+  authenticateToken,
+  requireAdmin,
+  uploadMiddleware.single('file'),
+  createResource
+);
+router.delete('/resources/:id', authenticateToken, requireAdmin, deleteResource);
+
+// Team Members Routes
+router.get('/team', getTeam);
+router.put('/team/:id', authenticateToken, requireAdmin, updateTeamMember);
+
+// Project Roadmap Routes
+router.get('/roadmap', getRoadmap);
+router.put('/roadmap/:id', authenticateToken, requireAdmin, updateRoadmapMilestone);
+
+// Feasibility Simulation Demonstration API
+router.post('/scheduler/simulate', simulateFeasibilityDecision);
+
+// Audit Logs (Admin only)
+router.get('/admin/audit-logs', authenticateToken, requireAdmin, (_req, res) => {
+  res.json({
+    success: true,
+    data: db.getAuditLogs(),
+  });
+});
+
+export default router;

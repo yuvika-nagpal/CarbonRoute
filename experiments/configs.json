@@ -1,0 +1,31 @@
+{
+  "project": "CarbonRoute",
+  "experiment_suite": "v1.0-evaluation-matrix",
+  "status": "Planned Methodology - Pending Benchmark Execution",
+  "dimensions": {
+    "regions": ["US-CAL-CISO", "US-TEX-ERCO", "GB", "DE", "DK-DK1"],
+    "workload_sizes": [50, 200, 1000],
+    "workload_classes": ["short", "medium", "long", "mixed"],
+    "forecast_error_levels": [
+      { "level": "low", "sigma_base": 10.0 },
+      { "level": "medium", "sigma_base": 30.0 },
+      { "level": "high", "sigma_base": 70.0 }
+    ],
+    "random_seeds": [42, 101, 202, 303, 404, 505, 606, 707, 808, 909]
+  },
+  "baselines": [
+    "Immediate",
+    "EDF",
+    "CostAware",
+    "StandardCarbonAware",
+    "CarbonRoute",
+    "OracleHindsight"
+  ],
+  "metrics": [
+    "total_carbon_gCO2eq",
+    "carbon_reduction_pct",
+    "deadline_violation_rate",
+    "brier_score",
+    "expected_calibration_error"
+  ]
+}

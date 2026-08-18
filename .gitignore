@@ -1,0 +1,24 @@
+# Node
+node_modules/
+dist/
+build/
+.npm
+
+# Environment & Secrets
+.env
+.env.local
+.env.production
+*.pem
+
+# Database & Runtime Data
+database/*.db.json
+database/*.sqlite
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# OS Files
+.DS_Store
+Thumbs.db
