@@ -9,7 +9,7 @@ import {
   User,
 } from '../types';
 
-const API_BASE = '/api';
+const API_BASE = 'https://carbonroute.onrender.com/api';
 
 const DEFAULT_PRESENTATIONS: PresentationVersion[] = [
   {
