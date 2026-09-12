@@ -363,6 +363,104 @@ async function runVerticalSliceTests() {
     console.log(`      Sample Window: ${windows[0].windowLabel} -> Intensity: ${windows[0].predictedCarbonIntensity} g/kWh, Impact: ${windows[0].predictedCarbonImpactGrams} gCO2, Risk: ${windows[0].deadlineRiskPct}, Status: ${windows[0].classification}`);
   });
 
+  // =========================================================================
+  // TEST G: USER REQUIRED 4-CASE DYNAMIC SENSITIVITY VERIFICATION
+  // =========================================================================
+  await assert('Test G: Evaluates Cases A, B, C, D dynamically with strict risk-feasibility enforcement', async () => {
+    // -------------------------------------------------------------
+    // CASE A: Runtime = 3h, Deadline = 12h, Risk tolerance = 2% (0.02)
+    // -------------------------------------------------------------
+    const jobA = {
+      id: 'job-case-a',
+      name: 'ML Model Training Case A',
+      commandOrImage: 'carbonroute/ml-model:latest',
+      isContainerImage: true,
+      durationHours: 3,
+      deadlineHours: 12,
+      arrivalHour: 0,
+      cpu: 2,
+      memoryMb: 1024,
+      region: 'US-CAL-CISO',
+      riskTolerance: 0.02,
+    };
+    const decA = evaluateAllPolicies(jobA, forecastData, 1.0);
+
+    // Verify candidate windows: exactly 10 windows (T+0 to T+9)
+    if (decA.candidateWindows.length !== 10) {
+      throw new Error(`Case A: Expected 10 candidate windows, got ${decA.candidateWindows.length}`);
+    }
+    // Verify last candidate T+9 -> T+12 has 0 slack, 50% risk, and is REJECTED
+    const lastWinA = decA.candidateWindows[9];
+    if (lastWinA.windowLabel !== 'T+9:00 → T+12:00') {
+      throw new Error(`Case A: Expected last window T+9:00 → T+12:00, got ${lastWinA.windowLabel}`);
+    }
+    if (lastWinA.deadlineRisk < 0.49 || lastWinA.isFeasible !== false) {
+      throw new Error(`Case A: Last window should be rejected (risk ${lastWinA.deadlineRiskPct})`);
+    }
+
+    // Verify policy comparison feasibility enforcement:
+    const detA = decA.evaluatedPolicies.find(p => p.policyId === 'deterministic_carbon');
+    if (detA.estimatedDeadlineRisk > 0.02 && detA.isFeasible !== false) {
+      throw new Error(`Case A: Deterministic policy has risk ${(detA.estimatedDeadlineRisk * 100).toFixed(1)}% > 2% but is marked Feasible!`);
+    }
+
+    // Verify CarbonRoute recommendation strictly obeys tau = 2%
+    const recA = decA.recommendedDecision;
+    if (recA.estimatedDeadlineRisk > 0.0201) {
+      throw new Error(`Case A: CarbonRoute recommendation violates 2% risk tolerance: ${(recA.estimatedDeadlineRisk * 100).toFixed(2)}%`);
+    }
+
+    console.log('\n      === CASE A (Runtime=3h, Deadline=T+12, Risk Tol=2%) ===');
+    console.log(`      Candidate Windows Count: ${decA.candidateWindows.length} (T+0:00 to T+9:00)`);
+    console.log(`      CarbonRoute Recommended: ${recA.selectedWindow} (${recA.predictedCarbon} gCO2, Risk: ${(recA.estimatedDeadlineRisk * 100).toFixed(1)}%, Status: Feasible)`);
+    console.log(`      Deterministic Carbon:    ${detA.selectedWindow} (${detA.predictedCarbon} gCO2, Risk: ${(detA.estimatedDeadlineRisk * 100).toFixed(1)}%, Status: ${detA.isFeasible ? 'Feasible' : 'REJECTED'})`);
+
+    // -------------------------------------------------------------
+    // CASE B: Same Job, Risk tolerance = 50% (0.50)
+    // -------------------------------------------------------------
+    const jobB = { ...jobA, id: 'job-case-b', riskTolerance: 0.50 };
+    const decB = evaluateAllPolicies(jobB, forecastData, 1.0);
+
+    const detB = decB.evaluatedPolicies.find(p => p.policyId === 'deterministic_carbon');
+    if (detB.estimatedDeadlineRisk <= 0.50 && detB.isFeasible !== true) {
+      throw new Error(`Case B: Deterministic policy has risk <= 50% but is marked Infeasible!`);
+    }
+    const recB = decB.recommendedDecision;
+    console.log('\n      === CASE B (Runtime=3h, Deadline=T+12, Risk Tol=50%) ===');
+    console.log(`      CarbonRoute Recommended: ${recB.selectedWindow} (${recB.predictedCarbon} gCO2, Risk: ${(recB.estimatedDeadlineRisk * 100).toFixed(1)}%, Status: Feasible)`);
+    console.log(`      Deterministic Carbon:    ${detB.selectedWindow} (${detB.predictedCarbon} gCO2, Risk: ${(detB.estimatedDeadlineRisk * 100).toFixed(1)}%, Status: ${detB.isFeasible ? 'Feasible' : 'REJECTED'})`);
+
+    // -------------------------------------------------------------
+    // CASE C: Same Job, Runtime = 6h, Deadline = 12h, Risk Tol = 2%
+    // -------------------------------------------------------------
+    const jobC = { ...jobA, id: 'job-case-c', durationHours: 6, riskTolerance: 0.02 };
+    const decC = evaluateAllPolicies(jobC, forecastData, 1.0);
+
+    // Verify candidate windows: 12 - 6 + 1 = 7 windows (T+0 to T+6)
+    if (decC.candidateWindows.length !== 7) {
+      throw new Error(`Case C: Expected 7 candidate windows for 6h duration, got ${decC.candidateWindows.length}`);
+    }
+    const recC = decC.recommendedDecision;
+    console.log('\n      === CASE C (Runtime=6h, Deadline=T+12, Risk Tol=2%) ===');
+    console.log(`      Candidate Windows Count: ${decC.candidateWindows.length} (T+0:00 to T+6:00)`);
+    console.log(`      CarbonRoute Recommended: ${recC.selectedWindow} (${recC.predictedCarbon} gCO2, Risk: ${(recC.estimatedDeadlineRisk * 100).toFixed(1)}%, Status: Feasible)`);
+
+    // -------------------------------------------------------------
+    // CASE D: Same Job, Runtime = 3h, Deadline = T+8, Risk Tol = 2%
+    // -------------------------------------------------------------
+    const jobD = { ...jobA, id: 'job-case-d', deadlineHours: 8, riskTolerance: 0.02 };
+    const decD = evaluateAllPolicies(jobD, forecastData, 1.0);
+
+    // Verify candidate windows: 8 - 3 + 1 = 6 windows (T+0 to T+5)
+    if (decD.candidateWindows.length !== 6) {
+      throw new Error(`Case D: Expected 6 candidate windows for 8h deadline, got ${decD.candidateWindows.length}`);
+    }
+    const recD = decD.recommendedDecision;
+    console.log('\n      === CASE D (Runtime=3h, Deadline=T+8, Risk Tol=2%) ===');
+    console.log(`      Candidate Windows Count: ${decD.candidateWindows.length} (T+0:00 to T+5:00)`);
+    console.log(`      CarbonRoute Recommended: ${recD.selectedWindow} (${recD.predictedCarbon} gCO2, Risk: ${(recD.estimatedDeadlineRisk * 100).toFixed(1)}%, Status: Feasible)`);
+  });
+
   console.log('\n========================================================');
   console.log(`🎯 Prototype Vertical Slice Test Results: ${passed} PASSED, ${failed} FAILED`);
   console.log('========================================================\n');

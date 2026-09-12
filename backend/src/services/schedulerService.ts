@@ -143,7 +143,7 @@ export class SchedulerService {
       predictedCarbon: immCarbon,
       estimatedDeadlineRisk: immRisk,
       waitingTimeHours: 0,
-      isFeasible: immSlot + dur <= ddl,
+      isFeasible: immSlot + dur <= ddl && immRisk <= tau,
       schedulerOverheadMs: overheadImm,
       rationale: 'Dispatches job immediately upon arrival without intentional delay. Serves as benchmark baseline.',
     };
@@ -173,7 +173,7 @@ export class SchedulerService {
       predictedCarbon: edfCarbon,
       estimatedDeadlineRisk: edfRisk,
       waitingTimeHours: 0,
-      isFeasible: edfSlot + dur <= ddl,
+      isFeasible: edfSlot + dur <= ddl && edfRisk <= tau,
       schedulerOverheadMs: overheadEdf,
       rationale: 'Prioritizes deadline safety; executes at earliest feasible arrival to maximize remaining slack buffer.',
     };
@@ -212,7 +212,7 @@ export class SchedulerService {
       predictedCarbon: minDetCarbon === Infinity ? immCarbon : minDetCarbon,
       estimatedDeadlineRisk: detRisk,
       waitingTimeHours: bestDetSlot - arrival,
-      isFeasible: bestDetSlot + dur <= ddl,
+      isFeasible: bestDetSlot + dur <= ddl && detRisk <= tau,
       schedulerOverheadMs: overheadDet,
       rationale: `Greedily selects the lowest predicted carbon window (T+${bestDetSlot}) without uncertainty or risk calibration.`,
     };
@@ -254,18 +254,18 @@ export class SchedulerService {
       predictedCarbon: minBaseCarbon === Infinity ? immCarbon : minBaseCarbon,
       estimatedDeadlineRisk: baseRisk,
       waitingTimeHours: bestBaseSlot - arrival,
-      isFeasible: bestBaseSlot + dur <= ddl,
+      isFeasible: bestBaseSlot + dur <= ddl && baseRisk <= tau,
       schedulerOverheadMs: overheadBase,
       rationale: `Conventional heuristic: optimizes carbon within a fixed ${staticBuffer}h safety margin before deadline.`,
     };
 
     // -------------------------------------------------------------
     // FULL CANDIDATE WINDOWS EVALUATION & CLASSIFICATION
-    // Evaluates every possible execution window within horizon up to deadline
+    // Evaluates every possible execution window that can fit before the deadline
     // -------------------------------------------------------------
     const startCr = performance.now();
     const candidateWindows: CandidateWindowEvaluation[] = [];
-    const maxEvaluationHour = Math.min(horizon - 1, ddl + 1);
+    const maxEvaluationHour = Math.min(horizon - dur, ddl - dur);
     const powerKw = Math.max(0.1, Number((((job.cpu || 2) / 2) * 0.25).toFixed(3)));
     const energyKwh = Number((dur * powerKw).toFixed(3));
 
@@ -303,14 +303,14 @@ export class SchedulerService {
         reason = `Infeasible: A ${dur}h workload starting at T+${startHour}:00 finishes at T+${endHour}:00, which breaches the T+${ddl}:00 deadline by ${Math.abs(slackHours)} hour(s).`;
       } else if (deadlineRisk > tau) {
         classification = 'REJECTED_HIGH_RISK';
-        classificationLabel = 'REJECTED — HIGH DEADLINE RISK';
+        classificationLabel = 'REJECTED';
         isFeasible = false;
-        reason = `Rejected: Estimated deadline violation risk (${(deadlineRisk * 100).toFixed(1)}%) exceeds your ${(tau * 100).toFixed(0)}% risk tolerance threshold.`;
+        reason = `Risk exceeds ${(tau * 100).toFixed(0)}% tolerance (${(deadlineRisk * 100).toFixed(1)}% deadline-miss risk)`;
       } else {
         classification = 'FEASIBLE';
-        classificationLabel = 'FEASIBLE BUT NOT OPTIMAL';
+        classificationLabel = 'FEASIBLE';
         isFeasible = true;
-        reason = `Feasible alternative: Meets deadline (slack: ${slackHours}h) with deadline risk (${(deadlineRisk * 100).toFixed(1)}%) strictly below ${(tau * 100).toFixed(0)}% tolerance.`;
+        reason = `Feasible option: ${avgCarbon} gCO2/kWh with ${(deadlineRisk * 100).toFixed(1)}% deadline risk (within ${(tau * 100).toFixed(0)}% tolerance)`;
       }
 
       candidateWindows.push({
@@ -351,12 +351,7 @@ export class SchedulerService {
 
       optimalCandidate.classification = 'RECOMMENDED';
       optimalCandidate.classificationLabel = 'RECOMMENDED';
-
-      if (optimalCandidate.startHour === bestDetSlot) {
-        optimalCandidate.reason = `Optimal window recommended by CarbonRoute: achieves the global minimum carbon intensity (${optimalCandidate.predictedCarbonIntensity} gCO2/kWh, ${optimalCandidate.predictedCarbonImpactGrams}g total) with estimated deadline risk (${optimalCandidate.deadlineRiskPct}) safely within your ${(tau * 100).toFixed(0)}% tolerance.`;
-      } else {
-        optimalCandidate.reason = `Optimal risk-calibrated window recommended by CarbonRoute: achieves low carbon intensity (${optimalCandidate.predictedCarbonIntensity} gCO2/kWh, ${optimalCandidate.predictedCarbonImpactGrams}g total) with safe deadline risk (${optimalCandidate.deadlineRiskPct}). The unconstrained minimum window (T+${bestDetSlot}:00, ${minDetCarbon} gCO2) was rejected because its high forecast uncertainty elevated deadline breach risk to ${(detRisk * 100).toFixed(1)}%, exceeding your ${(tau * 100).toFixed(0)}% risk limit.`;
-      }
+      optimalCandidate.reason = `Lowest expected-carbon candidate among all windows satisfying the deadline and risk constraints.`;
     } else {
       // Safety fallback if no candidate satisfies tau: pick the deadline-compliant window with lowest risk
       const deadlineCompliant = candidateWindows.filter((w) => w.meetsDeadline);

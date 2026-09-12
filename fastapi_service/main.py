@@ -114,8 +114,8 @@ def schedule_workload(req: SchedulingRequest):
     cpu_cores = float(job.get("cpu", 1.0))
     p_avg = (cpu_cores / 2.0) * 0.25  # kW active power baseline
 
-    # Candidate Windows Enumeration
-    max_eval_hour = min(ddl + 1, len(profile) - dur)
+    # Candidate Windows Enumeration: evaluate all windows fitting before deadline
+    max_eval_hour = min(ddl - dur, len(profile) - dur)
     candidate_windows = []
 
     for t in range(0, max_eval_hour + 1):
@@ -131,18 +131,18 @@ def schedule_workload(req: SchedulingRequest):
         if not meets_deadline:
             risk = 1.0
             classification = "REJECTED_DEADLINE_BREACH"
-            label = "REJECTED — MISSES DEADLINE"
-            reason = f"Execution window ends at T+{t + dur}:00, which exceeds the deadline (T+{ddl}:00)."
+            label = "REJECTED"
+            reason = f"Execution window ends at T+{t + dur}:00, exceeding deadline (T+{ddl}:00)."
         else:
             risk = estimate_deadline_risk(t, dur, ddl, std, req.uncertainty_multiplier)
             if risk > tau:
                 classification = "REJECTED_HIGH_RISK"
-                label = "REJECTED — HIGH DEADLINE RISK"
-                reason = f"Estimated deadline risk ({risk * 100:.1f}%) exceeds maximum tolerance ({tau * 100:.0f}%)."
+                label = "REJECTED"
+                reason = f"Risk exceeds {tau * 100:.0f}% tolerance ({risk * 100:.1f}% deadline-miss risk)"
             else:
                 classification = "FEASIBLE"
-                label = "FEASIBLE BUT NOT OPTIMAL"
-                reason = f"Feasible window: {avg_intensity:.1f} gCO2/kWh with {risk * 100:.1f}% risk."
+                label = "FEASIBLE"
+                reason = f"Feasible option: {avg_intensity:.1f} gCO2/kWh with {risk * 100:.1f}% risk"
 
         candidate_windows.append({
             "slotIndex": t,
@@ -197,6 +197,8 @@ def schedule_workload(req: SchedulingRequest):
             if w_avg < min_base_c:
                 min_base_c = w_avg
                 best_base = t
+    base_std = 15.0 * math.sqrt(1.0 + (best_base / 6.0))
+    base_risk = estimate_deadline_risk(best_base, dur, ddl, base_std, req.uncertainty_multiplier)
 
     # 5. CarbonRoute Uncertainty-Aware (min carbon feasible window)
     feasible_windows = [w for w in candidate_windows if w["isFeasible"]]
@@ -208,7 +210,7 @@ def schedule_workload(req: SchedulingRequest):
             if w["slotIndex"] == best_win["slotIndex"]:
                 w["classification"] = "RECOMMENDED"
                 w["classificationLabel"] = "RECOMMENDED"
-                w["reason"] = f"Optimal risk-calibrated window: minimizes carbon emissions ({w['predictedCarbonIntensity']} gCO2/kWh) while bounding deadline risk ({w['deadlineRiskPct']}) within tolerance."
+                w["reason"] = "Lowest expected-carbon candidate among all windows satisfying the deadline and risk constraints."
 
         cr_slot = best_win["startHour"]
         cr_carbon = best_win["predictedCarbonIntensity"]
@@ -227,11 +229,11 @@ def schedule_workload(req: SchedulingRequest):
         "region": region,
         "candidateWindows": candidate_windows,
         "evaluatedPolicies": [
-            {"policyId": "immediate", "policyName": "Immediate", "selectedStartHour": arrival, "predictedCarbon": imm_carbon, "estimatedDeadlineRisk": imm_risk, "waitingTimeHours": 0, "isFeasible": True},
-            {"policyId": "edf", "policyName": "EDF", "selectedStartHour": edf_slot, "predictedCarbon": edf_carbon, "estimatedDeadlineRisk": imm_risk, "waitingTimeHours": 0, "isFeasible": True},
+            {"policyId": "immediate", "policyName": "Immediate", "selectedStartHour": arrival, "predictedCarbon": imm_carbon, "estimatedDeadlineRisk": imm_risk, "waitingTimeHours": 0, "isFeasible": imm_risk <= tau},
+            {"policyId": "edf", "policyName": "EDF", "selectedStartHour": edf_slot, "predictedCarbon": edf_carbon, "estimatedDeadlineRisk": imm_risk, "waitingTimeHours": 0, "isFeasible": imm_risk <= tau},
             {"policyId": "deterministic_carbon", "policyName": "Deterministic Carbon", "selectedStartHour": best_det, "predictedCarbon": round(min_det_c, 1), "estimatedDeadlineRisk": det_risk, "waitingTimeHours": best_det, "isFeasible": det_risk <= tau},
-            {"policyId": "carbonaware_baseline", "policyName": "CarbonAware Baseline", "selectedStartHour": best_base, "predictedCarbon": round(min_base_c, 1), "estimatedDeadlineRisk": 0.01, "waitingTimeHours": best_base, "isFeasible": True},
-            {"policyId": "carbonroute_uncertainty", "policyName": "CarbonRoute Uncertainty-Aware", "selectedStartHour": cr_slot, "predictedCarbon": cr_carbon, "estimatedDeadlineRisk": cr_risk, "waitingTimeHours": cr_slot, "isFeasible": True, "rationale": rationale}
+            {"policyId": "carbonaware_baseline", "policyName": "CarbonAware Baseline", "selectedStartHour": best_base, "predictedCarbon": round(min_base_c, 1), "estimatedDeadlineRisk": base_risk, "waitingTimeHours": best_base, "isFeasible": base_risk <= tau},
+            {"policyId": "carbonroute_uncertainty", "policyName": "CarbonRoute Uncertainty-Aware", "selectedStartHour": cr_slot, "predictedCarbon": cr_carbon, "estimatedDeadlineRisk": cr_risk, "waitingTimeHours": cr_slot, "isFeasible": cr_risk <= tau, "rationale": rationale}
         ],
         "recommendedDecision": {
             "policyId": "carbonroute_uncertainty",
