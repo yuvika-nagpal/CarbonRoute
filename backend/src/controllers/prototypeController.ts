@@ -128,7 +128,11 @@ export const scheduleJob = async (req: Request, res: Response) => {
       });
     }
 
-    const forecast = await CarbonService.getForecast(targetJob!.region || region);
+    const mode: 'live' | 'demo' =
+      req.body.mode === 'demo' || req.body.dataSource === 'demo' ? 'demo' : 'live';
+
+    const targetRegion = targetJob!.region || region;
+    const forecast = await CarbonService.getForecast(targetRegion, 24, mode);
     const decisionResponse = SchedulerService.evaluateAllPolicies(
       targetJob!,
       forecast,
@@ -142,7 +146,10 @@ export const scheduleJob = async (req: Request, res: Response) => {
       data: decisionResponse,
     });
   } catch (error: any) {
-    return res.status(500).json({ success: false, message: error.message });
+    return res.status(503).json({
+      success: false,
+      message: error.message || 'Live carbon forecast unavailable.',
+    });
   }
 };
 
@@ -255,10 +262,15 @@ export const getCarbonForecast = async (req: Request, res: Response) => {
   try {
     const region = String(req.query.region || 'US-CAL-CISO');
     const horizon = Number(req.query.horizon) || 24;
-    const data = await CarbonService.getForecast(region, horizon);
+    const mode: 'live' | 'demo' =
+      req.query.mode === 'demo' || req.query.dataSource === 'demo' ? 'demo' : 'live';
+    const data = await CarbonService.getForecast(region, horizon, mode);
     return res.json({ success: true, data });
   } catch (error: any) {
-    return res.status(500).json({ success: false, message: error.message });
+    return res.status(503).json({
+      success: false,
+      message: error.message || 'Live carbon forecast unavailable.',
+    });
   }
 };
 

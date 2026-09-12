@@ -47,7 +47,7 @@ async function runVerticalSliceTests() {
   // TEST 1: Carbon Service Ingestion & Fallback
   let forecastData = null;
   await assert('Step 1: Carbon forecast returns 24 calibrated hourly points with confidence bounds', async () => {
-    forecastData = await getForecast('US-CAL-CISO');
+    forecastData = await getForecast('US-CAL-CISO', 24, 'demo');
     if (!forecastData || !forecastData.hourlyProfile || forecastData.hourlyProfile.length !== 24) {
       throw new Error(`Expected 24 points, got ${forecastData?.hourlyProfile?.length}`);
     }

@@ -24,7 +24,11 @@ export interface PolicyEvaluationResult {
   selectedStartHour: number;
   selectedEndHour: number;
   selectedWindow: string;
-  predictedCarbon: number; // Window average carbon intensity in gCO2eq/kWh
+  predictedCarbon: number; // Window average carbon intensity in gCO2eq/kWh (legacy alias)
+  predictedCarbonIntensity: number; // Window average carbon intensity in gCO2eq/kWh
+  estimatedWorkloadEmissionsGrams: number; // Estimated workload emissions in gCO2eq
+  carbonIntensityUnit: string; // 'gCO2eq/kWh'
+  workloadEmissionsUnit: string; // 'gCO2eq'
   estimatedDeadlineRisk: number; // e.g. 0.04 (4%)
   waitingTimeHours: number;
   isFeasible: boolean;
@@ -100,6 +104,8 @@ export class SchedulerService {
     const ddl = Math.min(horizon, Math.max(dur, Math.round(Number(job.deadlineHours) || dur + 2)));
     const arrival = Math.max(0, Math.min(ddl - dur, Math.round(Number(job.arrivalHour) || 0)));
     const tau = Math.max(0.001, Math.min(0.50, Number(job.riskTolerance) || 0.05));
+    const powerKw = Math.max(0.1, Number((((job.cpu || 2) / 2) * 0.25).toFixed(3)));
+    const energyKwh = Number((dur * powerKw).toFixed(3));
 
     /**
      * Helper: computes window average carbon intensity and average uncertainty
@@ -141,6 +147,10 @@ export class SchedulerService {
       selectedEndHour: immSlot + dur,
       selectedWindow: `T+${immSlot}:00 to T+${immSlot + dur}:00`,
       predictedCarbon: immCarbon,
+      predictedCarbonIntensity: immCarbon,
+      estimatedWorkloadEmissionsGrams: Math.round(immCarbon * energyKwh),
+      carbonIntensityUnit: 'gCO2eq/kWh',
+      workloadEmissionsUnit: 'gCO2eq',
       estimatedDeadlineRisk: immRisk,
       waitingTimeHours: 0,
       isFeasible: immSlot + dur <= ddl && immRisk <= tau,
@@ -171,6 +181,10 @@ export class SchedulerService {
       selectedEndHour: edfSlot + dur,
       selectedWindow: `T+${edfSlot}:00 to T+${edfSlot + dur}:00`,
       predictedCarbon: edfCarbon,
+      predictedCarbonIntensity: edfCarbon,
+      estimatedWorkloadEmissionsGrams: Math.round(edfCarbon * energyKwh),
+      carbonIntensityUnit: 'gCO2eq/kWh',
+      workloadEmissionsUnit: 'gCO2eq',
       estimatedDeadlineRisk: edfRisk,
       waitingTimeHours: 0,
       isFeasible: edfSlot + dur <= ddl && edfRisk <= tau,
@@ -201,6 +215,7 @@ export class SchedulerService {
       uncertaintyMultiplier
     ).violationRisk;
     const overheadDet = Number((performance.now() - startDet).toFixed(2));
+    const detCarbonVal = minDetCarbon === Infinity ? immCarbon : minDetCarbon;
 
     const detPolicy: PolicyEvaluationResult = {
       policyId: 'deterministic_carbon',
@@ -209,7 +224,11 @@ export class SchedulerService {
       selectedStartHour: bestDetSlot,
       selectedEndHour: bestDetSlot + dur,
       selectedWindow: `T+${bestDetSlot}:00 to T+${bestDetSlot + dur}:00`,
-      predictedCarbon: minDetCarbon === Infinity ? immCarbon : minDetCarbon,
+      predictedCarbon: detCarbonVal,
+      predictedCarbonIntensity: detCarbonVal,
+      estimatedWorkloadEmissionsGrams: Math.round(detCarbonVal * energyKwh),
+      carbonIntensityUnit: 'gCO2eq/kWh',
+      workloadEmissionsUnit: 'gCO2eq',
       estimatedDeadlineRisk: detRisk,
       waitingTimeHours: bestDetSlot - arrival,
       isFeasible: bestDetSlot + dur <= ddl && detRisk <= tau,
@@ -243,6 +262,7 @@ export class SchedulerService {
       uncertaintyMultiplier
     ).violationRisk;
     const overheadBase = Number((performance.now() - startBase).toFixed(2));
+    const baseCarbonVal = minBaseCarbon === Infinity ? immCarbon : minBaseCarbon;
 
     const baselinePolicy: PolicyEvaluationResult = {
       policyId: 'carbon_aware_baseline',
@@ -251,7 +271,11 @@ export class SchedulerService {
       selectedStartHour: bestBaseSlot,
       selectedEndHour: bestBaseSlot + dur,
       selectedWindow: `T+${bestBaseSlot}:00 to T+${bestBaseSlot + dur}:00`,
-      predictedCarbon: minBaseCarbon === Infinity ? immCarbon : minBaseCarbon,
+      predictedCarbon: baseCarbonVal,
+      predictedCarbonIntensity: baseCarbonVal,
+      estimatedWorkloadEmissionsGrams: Math.round(baseCarbonVal * energyKwh),
+      carbonIntensityUnit: 'gCO2eq/kWh',
+      workloadEmissionsUnit: 'gCO2eq',
       estimatedDeadlineRisk: baseRisk,
       waitingTimeHours: bestBaseSlot - arrival,
       isFeasible: bestBaseSlot + dur <= ddl && baseRisk <= tau,
@@ -266,8 +290,6 @@ export class SchedulerService {
     const startCr = performance.now();
     const candidateWindows: CandidateWindowEvaluation[] = [];
     const maxEvaluationHour = Math.min(horizon - dur, ddl - dur);
-    const powerKw = Math.max(0.1, Number((((job.cpu || 2) / 2) * 0.25).toFixed(3)));
-    const energyKwh = Number((dur * powerKw).toFixed(3));
 
     for (let t = arrival; t <= maxEvaluationHour; t++) {
       const { avgCarbon, avgStd } = computeWindowMetrics(t);
@@ -374,6 +396,10 @@ export class SchedulerService {
       selectedEndHour: optimalCandidate.endHour,
       selectedWindow: optimalCandidate.windowLabel,
       predictedCarbon: optimalCandidate.predictedCarbonIntensity,
+      predictedCarbonIntensity: optimalCandidate.predictedCarbonIntensity,
+      estimatedWorkloadEmissionsGrams: optimalCandidate.predictedCarbonImpactGrams,
+      carbonIntensityUnit: 'gCO2eq/kWh',
+      workloadEmissionsUnit: 'gCO2eq',
       estimatedDeadlineRisk: optimalCandidate.deadlineRisk,
       waitingTimeHours: optimalCandidate.waitingTimeHours,
       isFeasible: optimalCandidate.isFeasible,

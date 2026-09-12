@@ -164,7 +164,11 @@ export interface PolicyEvaluationResult {
   category: 'Baseline' | 'Deterministic' | 'Uncertainty-Aware';
   selectedStartHour: number;
   selectedWindow: string;
-  predictedCarbon: number;
+  predictedCarbon: number; // legacy alias for grid intensity
+  predictedCarbonIntensity?: number; // gCO2eq/kWh
+  estimatedWorkloadEmissionsGrams?: number; // gCO2eq
+  carbonIntensityUnit?: string; // 'gCO2eq/kWh'
+  workloadEmissionsUnit?: string; // 'gCO2eq'
   estimatedDeadlineRisk: number;
   waitingTimeHours: number;
   isFeasible: boolean;

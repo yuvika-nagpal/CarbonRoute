@@ -169,49 +169,85 @@ export class PreparedTraceDataProvider implements ICarbonDataProvider {
 
 /**
  * Live Electricity Maps API provider for production integrations.
+ * Default data provider for the CarbonRoute Interactive Prototype.
  */
 export class ElectricityMapsDataProvider implements ICarbonDataProvider {
   public name = 'ElectricityMapsDataProvider';
   public source = 'Electricity Maps Live API';
   public dataMode: 'live' | 'demo' = 'live';
 
-  constructor(private apiKey: string) {}
+  constructor(private apiKey?: string) {}
 
   public async getForecast(
     region: string = 'US-CAL-CISO',
     horizonHours: number = 24
   ): Promise<CarbonForecastData> {
-    const validHorizon = Math.max(1, Math.min(48, Number(horizonHours) || 24));
-    const selectedRegion = REGIONAL_PROFILES[region] ? region : 'US-CAL-CISO';
-    const profile = REGIONAL_PROFILES[selectedRegion];
+    const key = (
+      this.apiKey ||
+      process.env.ELECTRICITY_MAPS_API_KEY ||
+      config.electricityMapsApiKey ||
+      ''
+    ).trim();
 
-    const response = await fetch(
-      `https://api.electricitymap.org/v3/carbon-intensity/forecast?zone=${encodeURIComponent(
-        selectedRegion
-      )}`,
-      {
-        headers: {
-          'auth-token': this.apiKey.trim(),
-        },
-      }
-    );
+    if (!key) {
+      throw new Error(
+        'Live carbon forecast unavailable: Electricity Maps API key is not configured.'
+      );
+    }
+
+    const validHorizon = Math.max(1, Math.min(48, Number(horizonHours) || 24));
+    const selectedRegion = region ? region.trim() : 'US-CAL-CISO';
+    const profile = REGIONAL_PROFILES[selectedRegion];
+    const regionName = profile ? profile.name : selectedRegion;
+
+    let response: Response;
+    try {
+      response = await fetch(
+        `https://api.electricitymap.org/v3/carbon-intensity/forecast?zone=${encodeURIComponent(
+          selectedRegion
+        )}`,
+        {
+          headers: {
+            'auth-token': key,
+          },
+        }
+      );
+    } catch (networkErr: any) {
+      throw new Error(
+        `Live carbon forecast unavailable: Network request failed (${networkErr.message}).`
+      );
+    }
 
     if (!response.ok) {
-      throw new Error(`Electricity Maps API HTTP error: ${response.status} ${response.statusText}`);
+      throw new Error(
+        `Live carbon forecast unavailable: Electricity Maps API responded with HTTP ${response.status} (${response.statusText}).`
+      );
     }
 
     const apiData = (await response.json()) as any;
     if (!apiData || !Array.isArray(apiData.forecast) || apiData.forecast.length === 0) {
-      throw new Error('Electricity Maps API returned empty forecast array');
+      throw new Error(
+        'Live carbon forecast unavailable: Electricity Maps returned an empty forecast.'
+      );
     }
 
     const now = new Date();
     const hourlyProfile: HourlyCarbonPoint[] = apiData.forecast
       .slice(0, validHorizon)
       .map((f: any, idx: number) => {
-        const dt = new Date(f.datetime || now.getTime() + idx * 3600000);
-        const intensity = Math.round(Number(f.carbonIntensity) || profile.baseCurve[idx % 24]);
-        const stdDev = Math.round(10 + Math.pow(idx, 1.25) * 2.2);
+        const dt = f.datetime ? new Date(f.datetime) : new Date(now.getTime() + idx * 3600000);
+        const rawIntensity = f.carbonIntensity ?? f.carbon_intensity;
+        if (typeof rawIntensity !== 'number' || isNaN(rawIntensity)) {
+          throw new Error(
+            `Live carbon forecast unavailable: Invalid carbon intensity value at index ${idx}.`
+          );
+        }
+
+        // Use actual returned hourly forecast value directly (never fallback to baseCurve)
+        const intensity = Math.round(rawIntensity);
+        const baseStd = profile?.baseStdDev?.[idx % 24] ?? 15;
+        const stdDev = Math.round(baseStd * (1.0 + 0.18 * Math.sqrt(idx)));
+
         return {
           hour: idx,
           offsetHour: idx,
@@ -221,7 +257,7 @@ export class ElectricityMapsDataProvider implements ICarbonDataProvider {
           stdDev,
           uncertainty: stdDev,
           uncertaintyStdDev: stdDev,
-          confidenceLow: Math.max(10, Math.round(intensity - 1.96 * stdDev)),
+          confidenceLow: Math.max(0, Math.round(intensity - 1.96 * stdDev)),
           confidenceHigh: Math.round(intensity + 1.96 * stdDev),
         };
       });
@@ -231,7 +267,7 @@ export class ElectricityMapsDataProvider implements ICarbonDataProvider {
     return {
       source: this.source,
       region: selectedRegion,
-      regionName: profile.name,
+      regionName,
       timestamp: now.toISOString(),
       dataMode: this.dataMode,
       traceVersion: 'v3.0-live-api',
@@ -253,49 +289,43 @@ export class ElectricityMapsDataProvider implements ICarbonDataProvider {
 }
 
 /**
- * CarbonService dispatcher: Uses Electricity Maps if key is configured,
- * otherwise cleanly delegates to the PreparedTraceDataProvider.
+ * CarbonService dispatcher: ElectricityMapsDataProvider is the DEFAULT provider.
+ * PreparedTraceDataProvider is explicitly available when mode === 'demo'.
+ * Errors in live mode are NOT suppressed or silently substituted.
  */
 export class CarbonService {
-  private static defaultProvider: ICarbonDataProvider = new PreparedTraceDataProvider();
+  private static liveProvider: ICarbonDataProvider = new ElectricityMapsDataProvider();
+  private static preparedProvider: ICarbonDataProvider = new PreparedTraceDataProvider();
 
-  private static getActiveProvider(): ICarbonDataProvider {
-    const apiKey =
-      process.env.ELECTRICITY_MAPS_API_KEY || (config as any)?.electricityMapsApiKey;
-    if (apiKey && apiKey.trim().length > 5) {
-      return new ElectricityMapsDataProvider(apiKey);
+  public static getProvider(mode: 'live' | 'demo' = 'live'): ICarbonDataProvider {
+    if (mode === 'demo') {
+      return this.preparedProvider;
     }
-    return this.defaultProvider;
+    return this.liveProvider;
   }
 
   public static async getForecast(
     region: string = 'US-CAL-CISO',
-    horizonHours: number = 24
+    horizonHours: number = 24,
+    mode: 'live' | 'demo' = 'live'
   ): Promise<CarbonForecastData> {
-    const provider = this.getActiveProvider();
-    try {
-      return await provider.getForecast(region, horizonHours);
-    } catch (err) {
-      console.warn(
-        `Active provider (${provider.name}) failed, falling back to PreparedTraceDataProvider:`,
-        err
-      );
-      return await this.defaultProvider.getForecast(region, horizonHours);
-    }
+    const provider = this.getProvider(mode);
+    return await provider.getForecast(region, horizonHours);
   }
 
   public static getAvailableRegions(): Array<{ code: string; name: string }> {
-    return this.defaultProvider.getAvailableRegions();
+    return this.preparedProvider.getAvailableRegions();
   }
 }
 
 /**
  * Top-level convenience function matching the specification.
- * Validates region and horizon, and never returns undefined.
+ * Validates region, horizon, and mode.
  */
 export async function getForecast(
   region: string = 'US-CAL-CISO',
-  horizonHours: number = 24
+  horizonHours: number = 24,
+  mode: 'live' | 'demo' = 'live'
 ): Promise<CarbonForecastData> {
-  return CarbonService.getForecast(region, horizonHours);
+  return CarbonService.getForecast(region, horizonHours, mode);
 }

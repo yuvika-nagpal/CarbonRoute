@@ -52,7 +52,9 @@ export const PrototypePage: React.FC = () => {
   const [riskTolerance, setRiskTolerance] = useState<number>(0.05);
 
   // 2. Data & Scheduling State
+  const [dataSourceMode, setDataSourceMode] = useState<'live' | 'demo'>('live');
   const [forecast, setForecast] = useState<CarbonForecastData | null>(null);
+  const [forecastError, setForecastError] = useState<string | null>(null);
   const [decision, setDecision] = useState<SchedulingDecisionResponse | null>(null);
   const [loadingSchedule, setLoadingSchedule] = useState<boolean>(false);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
@@ -73,15 +75,20 @@ export const PrototypePage: React.FC = () => {
   // Auto-scroll logs
   const terminalLogsRef = useRef<HTMLDivElement>(null);
 
-  // Load Carbon Forecast on Region change
-  const loadForecast = async (targetRegion: string) => {
+  // Load Carbon Forecast on Region or Data Source Mode change
+  const loadForecast = async (targetRegion: string, mode: 'live' | 'demo' = dataSourceMode) => {
+    setForecastError(null);
     try {
-      const res = await api.getCarbonForecast(targetRegion);
+      const res = await api.getCarbonForecast(targetRegion, mode);
       if (res.success && res.data) {
         setForecast(res.data);
+      } else {
+        setForecast(null);
+        setForecastError(res.message || 'Live carbon forecast unavailable.');
       }
-    } catch (err) {
-      console.error('Failed to load forecast:', err);
+    } catch (err: any) {
+      setForecast(null);
+      setForecastError(err.message || 'Live carbon forecast unavailable.');
     }
   };
 
@@ -97,13 +104,14 @@ export const PrototypePage: React.FC = () => {
   };
 
   useEffect(() => {
-    loadForecast(region);
+    loadForecast(region, dataSourceMode);
     checkCluster();
-  }, [region]);
+  }, [region, dataSourceMode]);
 
   // Execute Scheduling Evaluation
-  const handleEvaluateSchedule = async (e?: React.FormEvent) => {
+  const handleEvaluateSchedule = async (e?: React.FormEvent, overrideMode?: 'live' | 'demo') => {
     if (e) e.preventDefault();
+    const mode = overrideMode || dataSourceMode;
     setLoadingSchedule(true);
     setScheduleError(null);
 
@@ -121,10 +129,13 @@ export const PrototypePage: React.FC = () => {
         riskTolerance,
       };
 
-      const res = await api.scheduleJob({ jobData, region });
+      const res = await api.scheduleJob({ jobData, region, mode });
       if (res.success && res.data) {
         setDecision(res.data);
         setActiveJobId(res.data.job.id);
+        if (!forecast || forecast.region !== region || forecast.dataMode !== mode) {
+          loadForecast(region, mode);
+        }
       } else {
         setScheduleError(res.message || 'Scheduling evaluation failed.');
       }
@@ -439,7 +450,36 @@ export const PrototypePage: React.FC = () => {
               <option value="DE">Germany (Central Europe) — Mixed wind &amp; solar</option>
               <option value="IN-NO">Northern India — High thermal baseload &amp; midday solar</option>
             </select>
-            <span className="text-[10px] text-slate-500 block">Queries region's carbon profile</span>
+            <span className="text-[10px] text-slate-500 block">Queries selected region's live carbon profile</span>
+          </div>
+
+          {/* Carbon Data Source Mode */}
+          <div className="space-y-1.5">
+            <div className="flex justify-between items-center">
+              <label className="text-slate-300 font-semibold">Carbon Data Source</label>
+              <span
+                className={`text-[9px] font-mono px-1.5 py-0.5 rounded border uppercase font-bold ${
+                  dataSourceMode === 'live'
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                    : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                }`}
+              >
+                {dataSourceMode === 'live' ? 'DEFAULT: LIVE' : 'DEMO BENCHMARK'}
+              </span>
+            </div>
+            <select
+              value={dataSourceMode}
+              onChange={(e) => setDataSourceMode(e.target.value as 'live' | 'demo')}
+              className="w-full px-3.5 py-2.5 rounded-lg bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500"
+            >
+              <option value="live">Live Electricity Maps API (Default / Production)</option>
+              <option value="demo">Prepared Benchmark Trace (Demo / Tests)</option>
+            </select>
+            <span className="text-[10px] text-slate-500 block">
+              {dataSourceMode === 'live'
+                ? 'Queries live forecast from Electricity Maps API v3'
+                : 'Uses calibrated research traces for offline reproducibility'}
+            </span>
           </div>
 
           {/* Runtime Duration */}
@@ -481,7 +521,7 @@ export const PrototypePage: React.FC = () => {
           {/* Risk Tolerance tau */}
           <div className="space-y-1.5">
             <div className="flex justify-between">
-              <label className="text-slate-300 font-semibold">Deadline Risk Tolerance ($\tau$)</label>
+              <label className="text-slate-300 font-semibold">Deadline Risk Tolerance (&tau;)</label>
               <span className="text-emerald-400 font-bold">{(riskTolerance * 100).toFixed(0)}%</span>
             </div>
             <input
@@ -503,10 +543,37 @@ export const PrototypePage: React.FC = () => {
               className="px-6 py-3 rounded-xl bg-emerald-500 text-slate-950 font-bold hover:bg-emerald-400 transition-all font-mono flex items-center space-x-2 shadow-lg shadow-emerald-950/50 disabled:opacity-50"
             >
               <RefreshCw className={`w-4 h-4 ${loadingSchedule ? 'animate-spin' : ''}`} />
-              <span>Analyze Scheduling Options</span>
+              <span>Evaluate 5 Schedulers</span>
             </button>
           </div>
         </form>
+
+        {/* Live Error Banner with One-Click Demo Mode Fallback Option */}
+        {(scheduleError || forecastError) && (
+          <div className="mt-4 p-4 rounded-xl bg-rose-950/50 border border-rose-800/70 space-y-2 text-rose-200 font-mono text-xs">
+            <div className="flex items-start space-x-2 font-bold text-rose-400">
+              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+              <span>{scheduleError || forecastError}</span>
+            </div>
+            {dataSourceMode === 'live' && (
+              <div className="pt-2 border-t border-rose-900/50 flex flex-wrap items-center justify-between gap-3">
+                <span className="text-slate-300 text-[11px]">
+                  Electricity Maps live API requires <code className="text-emerald-300">ELECTRICITY_MAPS_API_KEY</code> on the backend. To evaluate the schedulers offline, switch to the calibrated benchmark trace:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDataSourceMode('demo');
+                    handleEvaluateSchedule(undefined, 'demo');
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-bold hover:bg-emerald-400 transition-all text-xs"
+                >
+                  Switch to Prepared Benchmark Trace (Demo)
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </section>
 
       {/* 3. SECTION B: CARBON INTENSITY FORECAST DATA */}
@@ -548,7 +615,7 @@ export const PrototypePage: React.FC = () => {
                   <div
                     key={point.hour}
                     className="flex flex-col items-center justify-end h-full group relative cursor-pointer"
-                    title={`T+${point.hour}:00: ${point.predictedCarbon} gCO2/kWh (±${point.stdDev})`}
+                    title={`T+${point.hour}:00: ${point.predictedCarbon} gCO2eq/kWh (±${point.stdDev})`}
                   >
                     <div
                       style={{ height: `${heightPercent}%` }}
@@ -565,9 +632,9 @@ export const PrototypePage: React.FC = () => {
                     </span>
 
                     {/* Tooltip */}
-                    <div className="absolute bottom-full mb-2 hidden group-hover:block z-30 w-32 p-2 bg-slate-900 text-[10px] font-mono text-slate-200 rounded border border-slate-700 shadow-xl pointer-events-none">
+                    <div className="absolute bottom-full mb-2 hidden group-hover:block z-30 w-36 p-2 bg-slate-900 text-[10px] font-mono text-slate-200 rounded border border-slate-700 shadow-xl pointer-events-none">
                       <div className="text-emerald-400 font-bold">T+{point.hour}:00</div>
-                      <div>Intensity: {point.predictedCarbon} gCO2</div>
+                      <div>Intensity: {point.predictedCarbon} gCO2eq/kWh</div>
                       <div className="text-slate-400">StdDev &sigma;: &plusmn;{point.stdDev}</div>
                     </div>
                   </div>
@@ -672,8 +739,8 @@ export const PrototypePage: React.FC = () => {
                     <tr>
                       <th className="p-3">Execution Window</th>
                       <th className="p-3">Wait Delay</th>
-                      <th className="p-3">Expected Carbon</th>
-                      <th className="p-3">Total Impact</th>
+                      <th className="p-3">Grid Intensity (gCO2eq/kWh)</th>
+                      <th className="p-3">Est. Emissions (gCO2eq)</th>
                       <th className="p-3">Forecast Uncertainty</th>
                       <th className="p-3">Deadline Risk</th>
                       <th className="p-3">Slack Time</th>
@@ -719,13 +786,13 @@ export const PrototypePage: React.FC = () => {
                               <span className="text-emerald-400 font-bold">
                                 {win.predictedCarbonIntensity.toFixed(1)}
                               </span>{' '}
-                              <span className="text-slate-500 text-[10px]">gCO2/kWh</span>
+                              <span className="text-slate-500 text-[10px]">gCO2eq/kWh</span>
                             </td>
                             <td className="p-3 whitespace-nowrap">
                               <span className="text-white font-bold">
                                 {win.predictedCarbonImpactGrams.toFixed(1)}
                               </span>{' '}
-                              <span className="text-slate-500 text-[10px]">gCO2</span>
+                              <span className="text-slate-500 text-[10px]">gCO2eq</span>
                             </td>
                             <td className="p-3 whitespace-nowrap text-slate-300">
                               <span className="text-slate-400">{win.uncertaintyRange}</span>{' '}
@@ -807,10 +874,10 @@ export const PrototypePage: React.FC = () => {
               </div>
 
               <div className="p-4 rounded-xl bg-slate-950/60 border border-emerald-500/30 space-y-1">
-                <span className="text-emerald-400 block text-[11px]">Expected Carbon</span>
+                <span className="text-emerald-400 block text-[11px]">Expected Grid Intensity</span>
                 <div className="text-lg font-extrabold text-emerald-300">
-                  {decision.recommendedDecision.predictedCarbon}{' '}
-                  <span className="text-xs text-slate-400">gCO2</span>
+                  {decision.recommendedDecision.predictedCarbonIntensity ?? decision.recommendedDecision.predictedCarbon}{' '}
+                  <span className="text-xs text-slate-400">gCO2eq/kWh</span>
                 </div>
                 <span className="text-emerald-400/80 text-[10px]">
                   {decision.comparisonSummary.carbonSavingsVsImmediatePct}% vs Immediate
@@ -929,7 +996,7 @@ export const PrototypePage: React.FC = () => {
                       </div>
                       <div className="mt-3 space-y-2">
                         <div className="text-2xl font-extrabold text-white">
-                          {immCarbon} <span className="text-xs font-normal text-slate-400">gCO2</span>
+                          {immCarbon} <span className="text-xs font-normal text-slate-400">gCO2eq/kWh</span>
                         </div>
                         <div className="flex items-center space-x-2 text-xs">
                           <span className="text-slate-400">Wait Delay:</span>
@@ -963,7 +1030,7 @@ export const PrototypePage: React.FC = () => {
                       </div>
                       <div className="mt-3 space-y-2">
                         <div className="text-2xl font-extrabold text-amber-300">
-                          {detCarbon} <span className="text-xs font-normal text-slate-400">gCO2</span>
+                          {detCarbon} <span className="text-xs font-normal text-slate-400">gCO2eq/kWh</span>
                         </div>
                         <div className="flex items-center space-x-2 text-xs">
                           <span className="text-slate-400">Wait Delay:</span>
@@ -1012,7 +1079,7 @@ export const PrototypePage: React.FC = () => {
                       </div>
                       <div className="mt-3 space-y-2">
                         <div className="text-2xl font-extrabold text-emerald-300">
-                          {recCarbon} <span className="text-xs font-normal text-slate-400">gCO2</span>
+                          {recCarbon} <span className="text-xs font-normal text-slate-400">gCO2eq/kWh</span>
                         </div>
                         <div className="flex items-center space-x-2 text-xs">
                           <span className="text-slate-400">Wait Delay:</span>
@@ -1060,7 +1127,8 @@ export const PrototypePage: React.FC = () => {
                     <th className="p-3">Policy Name</th>
                     <th className="p-3">Category</th>
                     <th className="p-3">Selected Start</th>
-                    <th className="p-3">Predicted Carbon</th>
+                    <th className="p-3">Grid Intensity (gCO2eq/kWh)</th>
+                    <th className="p-3">Est. Emissions (gCO2eq)</th>
                     <th className="p-3">Deadline Risk</th>
                     <th className="p-3">Wait Time</th>
                     <th className="p-3">Feasibility</th>
@@ -1083,7 +1151,8 @@ export const PrototypePage: React.FC = () => {
                         </td>
                         <td className="p-3 text-slate-400">{pol.category}</td>
                         <td className="p-3 text-slate-200">T+{pol.selectedStartHour}:00</td>
-                        <td className="p-3 text-emerald-400 font-bold">{pol.predictedCarbon} gCO2</td>
+                        <td className="p-3 text-emerald-400 font-bold">{pol.predictedCarbonIntensity ?? pol.predictedCarbon} gCO2eq/kWh</td>
+                        <td className="p-3 text-slate-300">{pol.estimatedWorkloadEmissionsGrams !== undefined ? `${pol.estimatedWorkloadEmissionsGrams} gCO2eq` : '-'}</td>
                         <td className="p-3">
                           <span
                             className={
@@ -1251,19 +1320,19 @@ export const PrototypePage: React.FC = () => {
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 text-xs font-mono">
             <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
-              <span className="text-slate-400 text-[11px] block">Predicted Carbon</span>
+              <span className="text-slate-400 text-[11px] block">Predicted Grid Intensity</span>
               <div className="text-xl font-bold text-white">
-                {executionRecord.predictedCarbon} gCO2
+                {executionRecord.predictedCarbon} gCO2eq/kWh
               </div>
               <span className="text-[10px] text-slate-500">Forecast at scheduling</span>
             </div>
 
             <div className="p-4 rounded-xl bg-slate-900 border border-emerald-500/30 space-y-1">
-              <span className="text-emerald-400 text-[11px] block">Realized Grid Carbon</span>
+              <span className="text-emerald-400 text-[11px] block">Realized Grid Intensity</span>
               <div className="text-xl font-bold text-emerald-300">
-                {executionRecord.realizedCarbon} gCO2
+                {executionRecord.realizedCarbon} gCO2eq/kWh
               </div>
-              <span className="text-[10px] text-emerald-400">Measured actual outcome</span>
+              <span className="text-[10px] text-emerald-400">Observed grid outcome</span>
             </div>
 
             {(() => {
@@ -1275,14 +1344,14 @@ export const PrototypePage: React.FC = () => {
                 executionRecord.carbonError ?? realized - executionRecord.predictedCarbon;
               return (
                 <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
-                  <span className="text-slate-400 text-[11px] block">Carbon Error</span>
+                  <span className="text-slate-400 text-[11px] block">Intensity Error</span>
                   <div
                     className={`text-xl font-bold ${
                       error >= 0 ? 'text-amber-400' : 'text-emerald-400'
                     }`}
                   >
                     {error > 0 ? '+' : ''}
-                    {error} gCO2
+                    {error} gCO2eq/kWh
                   </div>
                   <span className="text-[10px] text-slate-500">Realized &minus; Predicted</span>
                 </div>
@@ -1302,6 +1371,11 @@ export const PrototypePage: React.FC = () => {
               <div className="text-xl font-bold text-emerald-400">On Schedule</div>
               <span className="text-[10px] text-emerald-400">0% violation</span>
             </div>
+          </div>
+
+          {/* Measurement disclaimer */}
+          <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 text-[11px] text-slate-400 font-mono">
+            <span className="text-slate-300 font-semibold">Note on Metrics:</span> Grid carbon intensity is tracked in <code className="text-emerald-400">gCO2eq/kWh</code>. Workload carbon emissions in <code className="text-emerald-400">gCO2eq</code> are modeled estimates derived from scheduled execution duration and estimated hardware power draw; direct physical energy consumption is not claimed as measured unless hardware power meters are instrumented.
           </div>
         </section>
       )}

@@ -12,6 +12,9 @@ export const config = {
   jwtSecret: process.env.JWT_SECRET || 'carbonroute_super_secure_jwt_production_secret_2026_key',
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
   
+  // Electricity Maps Live API Key
+  electricityMapsApiKey: process.env.ELECTRICITY_MAPS_API_KEY || '',
+  
   // Storage Configuration
   storageType: (process.env.STORAGE_TYPE || 'local') as 'local' | 's3',
   localStorageDir: process.env.LOCAL_STORAGE_DIR || path.resolve(__dirname, '../../uploads'),

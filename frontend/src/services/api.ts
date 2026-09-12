@@ -718,12 +718,17 @@ export const api = {
     jobData?: Partial<WorkloadJob>;
     region?: string;
     uncertaintyMultiplier?: number;
+    mode?: 'live' | 'demo';
+    dataSource?: 'live' | 'demo';
   }): Promise<ApiResponse<SchedulingDecisionResponse>> {
     try {
       const res = await fetch(`${API_BASE}/schedule`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          ...payload,
+          mode: payload.mode || payload.dataSource || 'live',
+        }),
       });
       const json = await res.json().catch(() => null);
       if (res.ok && json && json.success) return json;
@@ -785,10 +790,13 @@ export const api = {
     }
   },
 
-  async getCarbonForecast(region?: string): Promise<ApiResponse<CarbonForecastData>> {
+  async getCarbonForecast(region?: string, mode: 'live' | 'demo' = 'live'): Promise<ApiResponse<CarbonForecastData>> {
     try {
-      const q = region ? `?region=${encodeURIComponent(region)}` : '';
-      const res = await fetch(`${API_BASE}/carbon/forecast${q}`);
+      const params = new URLSearchParams();
+      if (region) params.set('region', region);
+      if (mode) params.set('mode', mode);
+      const queryStr = params.toString() ? `?${params.toString()}` : '';
+      const res = await fetch(`${API_BASE}/carbon/forecast${queryStr}`);
       const json = await res.json().catch(() => null);
       if (res.ok && json && json.success) return json;
       return { success: false, message: json?.message || `Carbon forecast query failed (${res.status})` };
