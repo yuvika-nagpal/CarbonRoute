@@ -21,7 +21,7 @@ import { AdminPage } from './pages/AdminPage';
 export const App: React.FC = () => {
   return (
     <AuthProvider>
-      <Router>
+      <Router basename={import.meta.env.BASE_URL}>
         <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100 bg-tech-grid relative">
           <div className="absolute inset-0 bg-radial-gradient pointer-events-none" />
           <Navbar />
