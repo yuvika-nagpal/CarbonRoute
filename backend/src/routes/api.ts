@@ -18,6 +18,18 @@ import { getTeam, updateTeamMember } from '../controllers/teamController';
 import { getRoadmap, updateRoadmapMilestone } from '../controllers/roadmapController';
 import { serveFile } from '../controllers/storageController';
 import { simulateFeasibilityDecision } from '../controllers/schedulerController';
+import {
+  submitJob,
+  scheduleJob,
+  getJobStatus,
+  getJobResults,
+  dispatchJobToExecution,
+  getCarbonForecast,
+  getAvailableRegions,
+  getClusterHealth,
+  recordExperiment,
+  getExperiments,
+} from '../controllers/prototypeController';
 import { authenticateToken, requireAdmin, optionalAuth } from '../middleware/auth';
 import { uploadMiddleware } from '../middleware/upload';
 import { db } from '../models/db';
@@ -78,6 +90,22 @@ router.put('/roadmap/:id', authenticateToken, requireAdmin, updateRoadmapMilesto
 
 // Feasibility Simulation Demonstration API
 router.post('/scheduler/simulate', simulateFeasibilityDecision);
+
+// ==========================================
+// CarbonRoute Prototype Milestone API Routes
+// ==========================================
+router.post('/jobs', submitJob);
+router.post('/schedule', scheduleJob);
+router.get('/jobs/:id/status', getJobStatus);
+router.get('/jobs/:id/results', getJobResults);
+router.post('/jobs/:id/dispatch', dispatchJobToExecution);
+
+router.get('/carbon/forecast', getCarbonForecast);
+router.get('/carbon/regions', getAvailableRegions);
+router.get('/cluster/health', getClusterHealth);
+
+router.post('/experiments', recordExperiment);
+router.get('/experiments', getExperiments);
 
 // Audit Logs (Admin only)
 router.get('/admin/audit-logs', authenticateToken, requireAdmin, (_req, res) => {

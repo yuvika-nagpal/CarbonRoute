@@ -1,227 +1,144 @@
-# 🌿 CarbonRoute
+# 🌿 CarbonRoute: Prototype Milestone
 
-> **A Reproducible Benchmark and Deadline-Risk Calibrator for Carbon-Aware Batch Scheduling under Forecast Error**  
-> *17-Week Software Engineering Project (UCS503)*  
+> **Uncertainty-Aware Batch Workload Scheduling Under Carbon Forecast Errors**  
+> *Final-Year Capstone / Software Engineering Project (UCS503)*  
 > **Course Supervisor:** Sukhpal Singh  
-> **Research Team:** Yuvika Nagpal, Kumkum Gupta, Aaneya Sabharwal  
-> **Current Phase:** `PLANNING PHASE`
+> **Research Team (TriFlux):** Yuvika Nagpal (1024030141), Kumkum Gupta (1024030144), Aaneya Sabharwal (1024030147)  
+> **Current Milestone:** `PROTOTYPE MILESTONE (VERIFIED WORKING VERTICAL SLICE)`
 
 ---
 
-## 📌 Project Overview
+## 🚀 Working Prototype Milestone (Software Vertical Slice)
 
-CarbonRoute is a software system for evaluating carbon-aware batch scheduling when carbon forecasts, cloud capacity and workload conditions are uncertain.
-
-The web platform serves as the team's permanent project website and submission repository throughout the 17-week semester, featuring:
-1. **Public Research Website:**
-   - **Home (`/`):** Hero with status badge, animated pipeline visual, "Why CarbonRoute?" problem formulation, planned capabilities, project flow, and team preview.
-   - **Project Specification (`/project`):** 10 structured sections covering Problem, Motivation, Core Research Question, 10 Objectives, Scope (Included vs Not Included), Proposed System, 7 Scheduling Policies (with Oracle reference disclaimer), Uncertainty & Risk Formulation (Scenario A vs B), Evaluation metrics (marked *"To be evaluated"*), and 17-Week Roadmap.
-   - **System Architecture (`/architecture`):** Interactive clickable pipeline from Workload Generator to API/Dashboard + full-stack software topology (React, FastAPI, Simulation/Scheduling services, Storage).
-   - **Development Roadmap (`/roadmap`):** Phased 17-week development milestones from initial requirements to university semester defense.
-   - **Presentations Archive (`/presentations`):** Permanent archive of all course deliverables (Software Grid, Planning V1, Planning V2, Mid-Sem, Final).
-   - **Planning Presentation Viewer (`/presentations/planning/v1`):** Embedded real PDF presentation viewer with pagination, zoom, download, and Project Summary.
-   - **Future Dashboard Preview (`/dashboard`):** Modular UI architecture preview labeled *"Coming During Development"*.
-   - **Team Profile (`/team`):** Roles for Yuvika Nagpal, Kumkum Gupta, and Aaneya Sabharwal, plus shared responsibilities notice.
-2. **Admin / Content Management Area (`/admin`):**
-   - Secure login with session/JWT authentication and bcrypt password hashing.
-   - Dashboard statistics: Total Presentations, Published Versions, Drafts, Recent Uploads.
-   - Upload & versioning workflow: Drag-and-drop PPT/PDF upload, metadata input (Title, Type, Version, Date, Authors, Change Summary), **Interactive Preview Modal**, and **Publish** action.
-   - Immutable version retention: When V2 or V3 is published, V1 remains permanently accessible with full audit traceability.
-
----
-
-## 🛠️ Tech Stack & Architecture
-
-- **Frontend:** React 18, TypeScript, Tailwind CSS, Lucide Icons, Vite
-- **Backend:** Node.js / Express (TypeScript), REST API (FastAPI-compatible architecture)
-- **Document Rendering:** In-browser PDF streaming (`inline` & `attachment`), PDF.js canvas frame, and interactive slide stage
-- **Database:** JSON Document Database / PostgreSQL compatibility via SQLAlchemy / structured schema
-- **Security:** JWT Authentication, Bcrypt Password Hashing, Helmet security headers, CORS origin verification
+The Prototype Milestone implements an integrated, verifiable end-to-end software vertical slice:
 
 ```
-                         CARBONROUTE WEBSITE
-                                  │
-                 ┌────────────────┴────────────────┐
-                 │                                 │
-             PUBLIC SITE                         ADMIN
-                 │                                 │
-        ┌────────┼────────┐                 Upload PPT/PDF
-        │        │        │                        │
-       Home   Project  Presentations          Add metadata
-        │        │        │                        │
-     Future   Roadmap Planning V1               Preview
-    Dashboard             │                        │
-                      View PPT                  Publish
-                                                   │
-                                          Public presentation
-                                                   │
-                                          Version remains saved
+[Workload Submission] (duration, deadline, CPU/RAM, risk tolerance tau)
+        │
+        ▼
+[Regional Carbon Forecast] (Electricity Maps API / Calibrated 24h ISO Traces)
+        │
+        ▼
+[Horizon Uncertainty & Risk Model] (sigma(t) dispersion & Chebyshev erfc tail risk)
+        │
+        ▼
+[5 Schedulers Evaluated] (Immediate, EDF, Deterministic, Baseline, CarbonRoute)
+        │
+        ▼
+[CarbonRoute Decision Engine] (min E[Carbon(t)] subject to P(violation) <= tau)
+        │
+        ▼
+[Kubernetes Connector & Fallback Runner] (batch/v1 Job manifest or local sandbox)
+        │
+        ▼
+[Container Execution & Live Streaming Logs] (Progress epochs streamed to UI)
+        │
+        ▼
+[Empirical Carbon Accounting & Dashboard] (Realized emissions vs Immediate baseline)
 ```
 
 ---
 
-## 🚀 Quick Start & Local Setup
+## 🌐 Public Website & Navigation Structure (11 Pages)
 
-### Prerequisites
-- Node.js (v18+ recommended, v20+ or v24+ supported)
-- npm
+1. **Home (`/`):** Primary brand portal, active milestone banner, 3 CTAs (`Launch Prototype`, `Explore Project`, `Planning V1`), interactive 8-step pipeline visualizer, and verified milestone breakdown.
+2. **Project Specification (`/project`):** Scientific problem formulation, research gap, 10 formal objectives, boundaries, and mathematical formulations.
+3. **How It Works (`/how-it-works`):** Interactive 10-step lifecycle deep dive with governing mathematical equations and produced output artifacts.
+4. **Architecture (`/architecture`):** 10-layer architectural stack from React Web UI through Carbon Services, Uncertainty Modeling, and Schedulers to Kubernetes dispatch.
+5. **Interactive Prototype (`/prototype`):** Working vertical slice featuring preset workloads, custom parameter controls, live 24h carbon intensity chart with uncertainty envelopes, 5-policy comparative table, CarbonRoute decision card, Kubernetes manifest generator, live streaming terminal, and sensitivity experiments.
+6. **Experiments & Benchmarks (`/experiments`):** 5-dimensional evaluation protocol (Grid Regions, Workload Classes, Scale, Error Levels, Seeds) and academic integrity notice.
+7. **System Design (`/system-design`):** Formal software engineering UML models:
+   - **4 Use Cases:** Workload Registration (UC-01), Carbon Ingestion (UC-02), Multi-Policy Decision (UC-03), Kubernetes Dispatch (UC-04).
+   - **5 Sequence Diagrams:** End-to-End Vertical Slice (SQ-01), Uncertainty Calibration (SQ-02), Multi-Policy Benchmarking (SQ-03), Resilient Sandbox Fallback (SQ-04), Carbon Accounting (SQ-05).
+   - **Detailed Class Diagram (UML):** Complete entity hierarchy, interfaces, value objects, and service contracts.
+8. **Development Roadmap (`/roadmap`):** 17-week phased development tracking.
+9. **Team TriFlux (`/team`):** Member bios, student roll numbers, and technical divisions.
+10. **Resources & Deliverables (`/resources`):** Document repository for whitepapers, trace schemas, and architecture files.
+11. **Planning V1 Archive (`/presentations/planning/v1`):** Archived official 25-slide presentation with in-browser PDF viewer.
 
-### 1. Installation
+---
+
+## ⚡ 5 Scheduling Policies Implemented
+
+| # | Policy Name | Classification | Strategy & Logic | Deadline Risk Handling |
+|---|---|---|---|---|
+| 1 | **Immediate Execution** | Naive Baseline | Dispatches immediately at arrival ($t=0$). | Risk = 0% (zero temporal delay). |
+| 2 | **Earliest Deadline First (EDF)** | Classical Baseline | Prioritizes earliest deadline jobs; dispatches immediately if unconstrained. | Risk = 0% to minimal. |
+| 3 | **Deterministic Carbon-Aware** | Heuristic Benchmark | Seeks the absolute lowest mean carbon intensity window, ignoring forecast error. | **High Risk** (often selects windows close to deadline, risking SLA breaches). |
+| 4 | **CarbonAware Baseline** | Shifted Heuristic | Evaluates heuristic threshold shifting within safe window. | Moderate risk. |
+| 5 | **CarbonRoute Uncertainty-Aware** | Proposed System | Solves $t^* = \arg\min \mathbb{E}[C(t)]$ subject to $P(\text{violation}(t)) \le \tau$. | **Guarded**: strictly bound by user risk tolerance $\tau$. |
+
+---
+
+## 🔌 Kubernetes Integration & Resilient Sandbox Runner
+
+- **Kubernetes Batch Manifest:** Generates production `batch/v1` Job YAML specs with CPU/memory limits, restart policies, and carbon audit metadata labels.
+- **Minikube Support:** If Minikube or Docker Kubernetes is running, CarbonRoute submits jobs directly to the `carbonroute-jobs` namespace.
+- **Resilient Fallback Mode:** If no cluster is running, CarbonRoute detects offline status, sets `clusterMode = 'offline_fallback'`, and runs the workload via an isolated local subprocess sandbox runner (`docker/workload/workload.py`), streaming stdout progress epochs to the UI terminal without crashing.
+- **Starting Minikube (Optional):**
+  ```bash
+  minikube start
+  kubectl create namespace carbonroute-jobs
+  ```
+
+---
+
+## 🧪 Automated Verification Test Suite
+
+Run the automated prototype vertical slice test suite:
 
 ```bash
-# Clone the repository and navigate to project root
-cd carbonroute
+node tests/prototype_vertical_slice_test.cjs
+```
 
-# Install backend dependencies
+**Results:**
+```
+🧪 CarbonRoute: Prototype Milestone Vertical Slice Verification
+  ✅ PASS: Step 1: Carbon forecast returns 24 calibrated hourly points with confidence bounds
+  ✅ PASS: Step 2: Uncertainty sigma(t) monotonically expands across the 24h horizon
+  ✅ PASS: Step 3: Chebyshev erfc correctly bounds deadline risk between 0 and 1
+  ✅ PASS: Step 4: All 5 scheduling policies evaluated simultaneously with valid metrics
+  ✅ PASS: Step 5: Same forecast with high vs conservative risk tolerance produces different decisions
+  ✅ PASS: Step 6: Kubernetes batch/v1 manifest contains correct specs and metadata
+  ✅ PASS: Step 7: Dispatch workload and stream progress logs to completion
+
+🎯 Prototype Vertical Slice Test Results: 7 PASSED, 0 FAILED
+```
+
+---
+
+## 🛠️ Local Development & Deployment
+
+### Run Frontend
+```bash
+cd frontend
+npm install
+npm run dev      # Local dev at http://localhost:5173
+npm run build    # Production Vite build
+```
+
+### Run Node.js / Express Backend
+```bash
 cd backend
 npm install
-
-# Install frontend dependencies
-cd ../frontend
-npm install
+npm run dev      # Local dev at http://localhost:5000
+npm run build    # Compile TypeScript
+npm start        # Production server
 ```
 
-### 2. Generate Initial Presentation PDF
-
-To generate the official multi-slide `CarbonRoute_Planning_Presentation_V1.pdf` document:
-
+### Run Standalone Python FastAPI Service (Optional)
 ```bash
-cd carbonroute
-node scripts/generate_presentation_pdf.js
+cd fastapi_service
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
 ```
-
-### 3. Environment Variables
-
-Create `.env` files in `backend/` and `frontend/` (sample files provided):
-
-**`backend/.env`**:
-```env
-PORT=5000
-NODE_ENV=development
-JWT_SECRET=carbonroute_super_secure_academic_jwt_secret_2026
-STORAGE_TYPE=local
-LOCAL_STORAGE_DIR=./uploads
-ADMIN_USERNAME=admin
-ADMIN_EMAIL=admin@carbonroute.org
-ADMIN_PASSWORD=CarbonRoute2026!Secure
-```
-
-**`frontend/.env`**:
-```env
-VITE_API_BASE_URL=http://localhost:5000/api
-```
-
-### 4. Running Locally
-
-**Option A: Running Backend & Frontend in Development Mode**
-
-```bash
-# In Terminal 1 (Backend):
-cd backend
-npm run dev
-
-# In Terminal 2 (Frontend):
-cd frontend
-npm run dev
-```
-
-- **Frontend:** `http://localhost:5173`
-- **Backend API:** `http://localhost:5000/api`
-
-**Option B: Production Build (Single Port Unified Server)**
-
-```bash
-# Build Frontend
-cd frontend
-npm run build
-
-# Build Backend
-cd ../backend
-npm run build
-
-# Start Unified Server
-node dist/index.js
-```
-The server serves both the REST API and the React frontend on `http://localhost:5000`.
 
 ---
 
-## 🔐 Admin Authentication & Credentials
+## 👥 Team TriFlux (UCS503)
 
-| Credential | Value |
-|---|---|
-| **Login URL** | `/admin` or `/admin/login` |
-| **Username** | `admin` |
-| **Email** | `admin@carbonroute.org` |
-| **Password** | `CarbonRoute2026!Secure` |
-
----
-
-## 🔄 Live Demonstration Flow
-
-To demonstrate the full end-to-end workflow to the course evaluator:
-
-1. **Step 1:** Open the public website at `http://localhost:5000/` (or `http://localhost:5173/`).
-2. **Step 2:** Click **Presentations** in the top navigation.
-3. **Step 3:** Open **Planning Presentation V1**.
-4. **Step 4:** View the real embedded presentation document inside the web browser with page navigation, zoom, and fullscreen controls. Inspect the **Project Summary** below.
-5. **Step 5:** Navigate to **Admin / Login** (`/admin`).
-6. **Step 6:** Log in with credentials (`admin` / `CarbonRoute2026!Secure`).
-7. **Step 7:** Click **Upload Presentation**.
-8. **Step 8:** Select a PDF/PPT file, enter metadata:
-   - **Title:** `Planning Presentation V2`
-   - **Deliverable Type:** `Planning Presentation`
-   - **Version:** `v2`
-   - **Date:** `2026-08-24`
-   - **Authors:** `Yuvika Nagpal, Kumkum Gupta, Aaneya Sabharwal`
-   - **Change Summary:** `Updated uncertainty variance calibration curves and trace schemas`
-9. **Step 9:** Click **Preview** to verify the metadata dialog.
-10. **Step 10:** Click **Publish**.
-11. **Step 11:** Navigate to the public **Presentations** page (`/presentations`).
-12. **Step 12:** Open the newly published **Planning Presentation V2** (`/presentation/v2`).
-13. **Step 13:** Verify that **Planning Presentation V1** (`/presentations/planning/v1`) remains completely intact and accessible.
-
----
-
-## 🗄️ Database & Storage Architecture
-
-### Presentations Model (`PresentationItem`)
-```typescript
-interface PresentationItem {
-  id: string;
-  title: string;
-  deliverableType: 'software_grid' | 'planning' | 'midterm' | 'final' | 'other';
-  versionTag: string; // 'v1', 'v2', etc.
-  description: string;
-  fileName: string;
-  filePath: string;
-  fileSize: number;
-  mimeType: string;
-  fileUrl: string;
-  authors: string[];
-  uploaderName: string;
-  status: 'published' | 'draft' | 'archived';
-  presentationDate: string;
-  sha256Checksum: string;
-  changeSummary: string;
-  previousVersionId?: string;
-  createdAt: string;
-  publishedAt?: string;
-}
-```
-
-### Storage Retention
-- Files are stored in `backend/uploads/presentations/` and assigned SHA-256 integrity checksums.
-- Served with HTTP `Content-Disposition: inline` for in-browser PDF rendering and `?download=true` for local saving.
-
----
-
-## 👥 Research Team & Responsibilities
-
-| Team Member | Core Focus |
-|---|---|
-| **Yuvika Nagpal** | Simulation / Data / Workload Modelling |
-| **Kumkum Gupta** | Scheduling Algorithms / Uncertainty / Risk Calibration |
-| **Aaneya Sabharwal** | Backend / Dashboard / Deployment / Integration |
-
-> *Testing, documentation, evaluation and presentation are shared team responsibilities.*
+| Member | Roll Number | Focus Area |
+|---|---|---|
+| **Yuvika Nagpal** | 1024030141 | Grid Carbon Intensity Service & Workload Profiling |
+| **Kumkum Gupta** | 1024030144 | 5-Policy Schedulers, Uncertainty & Tail Risk Modeling |
+| **Aaneya Sabharwal** | 1024030147 | Backend Controllers, Kubernetes Connector & Prototype UI |

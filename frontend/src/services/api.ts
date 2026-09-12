@@ -7,6 +7,11 @@ import {
   RoadmapMilestone,
   FeasibilityResult,
   User,
+  WorkloadJob,
+  CarbonForecastData,
+  SchedulingDecisionResponse,
+  K8sJobExecutionRecord,
+  ExperimentRecord,
 } from '../types';
 
 export const BACKEND_URL =
@@ -611,5 +616,141 @@ export const api = {
         feasibilityConclusion: 'Uncertainty changes scheduling decisions even when point forecasts are identical.',
       },
     };
+  },
+
+  // Prototype & Scheduling Methods
+  async submitJob(jobData: Partial<WorkloadJob>): Promise<ApiResponse<WorkloadJob>> {
+    try {
+      const res = await fetch(`${API_BASE}/jobs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(jobData),
+      });
+      const json = await res.json().catch(() => null);
+      if (res.ok && json && json.success) return json;
+      return { success: false, message: json?.message || `Job submission failed (${res.status})` };
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Network error submitting job.' };
+    }
+  },
+
+  async scheduleJob(payload: {
+    jobId?: string;
+    jobData?: Partial<WorkloadJob>;
+    region?: string;
+    uncertaintyMultiplier?: number;
+  }): Promise<ApiResponse<SchedulingDecisionResponse>> {
+    try {
+      const res = await fetch(`${API_BASE}/schedule`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json().catch(() => null);
+      if (res.ok && json && json.success) return json;
+      return { success: false, message: json?.message || `Scheduling failed (${res.status})` };
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Network error executing scheduler.' };
+    }
+  },
+
+  async dispatchJob(
+    jobId: string,
+    payload?: { predictedCarbon?: number; simulatedDurationSec?: number }
+  ): Promise<ApiResponse<K8sJobExecutionRecord>> {
+    try {
+      const res = await fetch(`${API_BASE}/jobs/${encodeURIComponent(jobId)}/dispatch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload || {}),
+      });
+      const json = await res.json().catch(() => null);
+      if (res.ok && json && json.success) return json;
+      return { success: false, message: json?.message || `Dispatch failed (${res.status})` };
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Network error dispatching workload.' };
+    }
+  },
+
+  async getJobStatus(jobId: string): Promise<ApiResponse<K8sJobExecutionRecord>> {
+    try {
+      const res = await fetch(`${API_BASE}/jobs/${encodeURIComponent(jobId)}/status`);
+      const json = await res.json().catch(() => null);
+      if (res.ok && json && json.success) return json;
+      return { success: false, message: json?.message || `Status check failed (${res.status})` };
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Network error fetching job status.' };
+    }
+  },
+
+  async getJobResults(jobId: string): Promise<ApiResponse<K8sJobExecutionRecord>> {
+    try {
+      const res = await fetch(`${API_BASE}/jobs/${encodeURIComponent(jobId)}/results`);
+      const json = await res.json().catch(() => null);
+      if (res.ok && json && json.success) return json;
+      return { success: false, message: json?.message || `Results query failed (${res.status})` };
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Network error fetching job results.' };
+    }
+  },
+
+  async getCarbonForecast(region?: string): Promise<ApiResponse<CarbonForecastData>> {
+    try {
+      const q = region ? `?region=${encodeURIComponent(region)}` : '';
+      const res = await fetch(`${API_BASE}/carbon/forecast${q}`);
+      const json = await res.json().catch(() => null);
+      if (res.ok && json && json.success) return json;
+      return { success: false, message: json?.message || `Carbon forecast query failed (${res.status})` };
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Network error fetching carbon forecast.' };
+    }
+  },
+
+  async getCarbonRegions(): Promise<ApiResponse<{ code: string; name: string }[]>> {
+    try {
+      const res = await fetch(`${API_BASE}/carbon/regions`);
+      const json = await res.json().catch(() => null);
+      if (res.ok && json && json.success) return json;
+      return { success: false, message: json?.message || `Regions query failed (${res.status})` };
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Network error fetching regions.' };
+    }
+  },
+
+  async getClusterHealth(): Promise<ApiResponse<{ isAvailable: boolean; message: string }>> {
+    try {
+      const res = await fetch(`${API_BASE}/cluster/health`);
+      const json = await res.json().catch(() => null);
+      if (res.ok && json && json.success) return json;
+      return { success: false, message: json?.message || `Cluster health check failed (${res.status})` };
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Network error checking cluster health.' };
+    }
+  },
+
+  async recordExperiment(expData: any): Promise<ApiResponse<ExperimentRecord>> {
+    try {
+      const res = await fetch(`${API_BASE}/experiments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(expData),
+      });
+      const json = await res.json().catch(() => null);
+      if (res.ok && json && json.success) return json;
+      return { success: false, message: json?.message || `Failed to record experiment (${res.status})` };
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Network error recording experiment.' };
+    }
+  },
+
+  async getExperiments(): Promise<ApiResponse<ExperimentRecord[]>> {
+    try {
+      const res = await fetch(`${API_BASE}/experiments`);
+      const json = await res.json().catch(() => null);
+      if (res.ok && json && json.success) return json;
+      return { success: false, message: json?.message || `Failed to fetch experiments (${res.status})` };
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Network error fetching experiments.' };
+    }
   },
 };

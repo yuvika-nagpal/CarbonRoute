@@ -116,6 +116,112 @@ export interface FeasibilityResult {
   feasibilityConclusion: string;
 }
 
+// ==========================================
+// Prototype & Scheduling Types
+// ==========================================
+export interface WorkloadJob {
+  id: string;
+  name: string;
+  commandOrImage: string;
+  isContainerImage: boolean;
+  durationHours: number;
+  deadlineHours: number;
+  arrivalHour: number;
+  cpu: number;
+  memoryMb: number;
+  region: string;
+  riskTolerance: number; // tau
+  status?: 'pending' | 'scheduled' | 'running' | 'completed' | 'failed';
+  createdAt: string;
+}
+
+export interface HourlyCarbonPoint {
+  hour: number;
+  timestamp: string;
+  predictedCarbon: number;
+  stdDev: number;
+}
+
+export interface CarbonForecastData {
+  source: string;
+  region: string;
+  regionName: string;
+  timestamp: string;
+  dataMode: 'live' | 'demo';
+  traceVersion: string;
+  forecastHorizonHours: number;
+  timeResolution: string;
+  hourlyProfile: HourlyCarbonPoint[];
+  averageCarbon: number;
+  minCarbon: number;
+  maxCarbon: number;
+}
+
+export interface PolicyEvaluationResult {
+  policyId: string;
+  policyName: string;
+  category: 'Baseline' | 'Deterministic' | 'Uncertainty-Aware';
+  selectedStartHour: number;
+  selectedWindow: string;
+  predictedCarbon: number;
+  estimatedDeadlineRisk: number;
+  waitingTimeHours: number;
+  isFeasible: boolean;
+  schedulerOverheadMs: number;
+  rationale: string;
+}
+
+export interface SchedulingDecisionResponse {
+  job: WorkloadJob;
+  carbonSource: string;
+  dataMode: 'live' | 'demo';
+  region: string;
+  evaluatedPolicies: PolicyEvaluationResult[];
+  recommendedDecision: PolicyEvaluationResult;
+  comparisonSummary: {
+    carbonSavingsVsImmediatePct: number;
+    delayPenaltyHours: number;
+    riskDifferenceVsDeterministic: number;
+  };
+}
+
+export interface K8sJobExecutionRecord {
+  jobId: string;
+  k8sJobName: string;
+  podName: string;
+  namespace: string;
+  status: 'pending' | 'scheduled' | 'running' | 'completed' | 'failed';
+  containerImage: string;
+  command: string;
+  scheduledStartTime: string;
+  actualStartTime?: string;
+  completionTime?: string;
+  exitCode?: number | string;
+  logs: string[];
+  clusterMode: 'minikube' | 'offline_fallback';
+  clusterNotice: string;
+  predictedCarbon: number;
+  realizedCarbon?: number | string;
+  durationSeconds: number;
+}
+
+export interface ExperimentRecord {
+  id: string;
+  timestamp: string;
+  region: string;
+  workload: string;
+  durationHours: number;
+  deadlineHours: number;
+  riskTolerance: number;
+  selectedScheduler: string;
+  selectedStartHour: number;
+  predictedCarbon: number;
+  realizedCarbon: number | string;
+  waitingTimeHours: number;
+  deadlineRisk: number;
+  status: string;
+}
+
 export interface ApiResponse<T> {
   success: boolean;
   message?: string;
