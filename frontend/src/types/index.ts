@@ -200,6 +200,14 @@ export interface CandidateWindowEvaluation {
   reason: string;
 }
 
+export interface ResearchInsightLowestVsSafest {
+  lowestCarbonWindow: CandidateWindowEvaluation;
+  recommendedWindow: CandidateWindowEvaluation;
+  isLowestCarbonSafe: boolean;
+  carbonInsurancePenaltyGramsPerKwh: number;
+  explanation: string;
+}
+
 export interface SchedulingDecisionResponse {
   job: WorkloadJob;
   carbonSource: string;
@@ -213,6 +221,7 @@ export interface SchedulingDecisionResponse {
     delayPenaltyHours: number;
     riskDifferenceVsDeterministic: number;
   };
+  researchInsight?: ResearchInsightLowestVsSafest;
 }
 
 export interface K8sJobExecutionRecord {

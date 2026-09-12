@@ -461,6 +461,111 @@ async function runVerticalSliceTests() {
     console.log(`      CarbonRoute Recommended: ${recD.selectedWindow} (${recD.predictedCarbon} gCO2, Risk: ${(recD.estimatedDeadlineRisk * 100).toFixed(1)}%, Status: Feasible)`);
   });
 
+  // =========================================================================
+  // TEST H: CONTROLLED RESEARCH BENCHMARK 5-POLICY DIVERGENCE & RESEARCH INSIGHT
+  // =========================================================================
+  await assert('Test H: Controlled Research Benchmark (BENCHMARK-RESEARCH) demonstrates genuine 5-policy divergence & research insight', async () => {
+    const benchmarkForecast = await getForecast('BENCHMARK-RESEARCH', 24, 'demo');
+    if (!benchmarkForecast || benchmarkForecast.hourlyProfile.length !== 24) {
+      throw new Error(`Expected 24 points in BENCHMARK-RESEARCH, got ${benchmarkForecast?.hourlyProfile?.length}`);
+    }
+
+    const researchJob = {
+      id: 'job-research-benchmark',
+      name: 'Controlled Research Experiment Job',
+      commandOrImage: 'carbonroute/benchmark-workload:latest',
+      isContainerImage: true,
+      durationHours: 2,
+      deadlineHours: 12,
+      arrivalHour: 0,
+      cpu: 2,
+      memoryMb: 1024,
+      region: 'BENCHMARK-RESEARCH',
+      riskTolerance: 0.05,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    };
+
+    const dec = evaluateAllPolicies(researchJob, benchmarkForecast, 1.0);
+    const policies = dec.evaluatedPolicies;
+
+    if (policies.length !== 5) {
+      throw new Error(`Expected 5 policies, got ${policies.length}`);
+    }
+
+    const imm = policies.find(p => p.policyId === 'immediate');
+    const edf = policies.find(p => p.policyId === 'edf' || p.policyId === 'earliest_deadline_first');
+    const det = policies.find(p => p.policyId === 'deterministic_carbon');
+    const base = policies.find(p => p.policyId === 'carbon_aware_baseline');
+    const cr = policies.find(p => p.policyId === 'carbonroute_uncertainty');
+
+    if (!imm || !edf || !det || !base || !cr) {
+      throw new Error('One or more of the 5 policies are missing');
+    }
+
+    // 1. Immediate starts at T+0
+    if (imm.selectedStartHour !== 0 || imm.isFeasible !== true) {
+      throw new Error(`Immediate policy did not select T+0 or is not feasible: T+${imm.selectedStartHour}`);
+    }
+
+    // 2. EDF starts at earliest arrival T+0 with maximal slack
+    if (edf.selectedStartHour !== 0 || edf.isFeasible !== true) {
+      throw new Error(`EDF policy did not select T+0: T+${edf.selectedStartHour}`);
+    }
+
+    // 3. Deterministic greedy carbon picks T+10 (lowest point forecast ~133 gCO2eq/kWh)
+    // but has 50% risk which violates tau=5%, so is marked REJECTED (isFeasible: false)
+    if (det.selectedStartHour !== 10) {
+      throw new Error(`Deterministic carbon should greedily select T+10, got T+${det.selectedStartHour}`);
+    }
+    if (det.isFeasible !== false) {
+      throw new Error(`Deterministic carbon at T+10 (risk ${(det.estimatedDeadlineRisk * 100).toFixed(1)}%) should be REJECTED`);
+    }
+
+    // 4. CarbonAware baseline threshold selects safe window T+2 or T+3
+    if (base.selectedStartHour < 1 || base.selectedStartHour > 3 || base.isFeasible !== true) {
+      throw new Error(`CarbonAware baseline should select T+2 or T+3, got T+${base.selectedStartHour}`);
+    }
+
+    // 5. CarbonRoute rejects T+10 and selects T+2 (the lowest carbon FEASIBLE window)
+    if (cr.selectedStartHour !== 2 || cr.isFeasible !== true) {
+      throw new Error(`CarbonRoute should select T+2, got T+${cr.selectedStartHour}`);
+    }
+    if (cr.estimatedDeadlineRisk > 0.05) {
+      throw new Error(`CarbonRoute selected window exceeds risk tolerance: ${(cr.estimatedDeadlineRisk * 100).toFixed(2)}%`);
+    }
+
+    // 6. Verify researchInsight structure and contents
+    const ri = dec.researchInsight;
+    if (!ri) {
+      throw new Error('Missing researchInsight in scheduling decision response');
+    }
+    if (ri.lowestCarbonWindow.windowLabel !== 'T+10:00 → T+12:00') {
+      throw new Error(`Expected lowestCarbonWindow "T+10:00 → T+12:00", got "${ri.lowestCarbonWindow.windowLabel}"`);
+    }
+    if (ri.isLowestCarbonSafe !== false) {
+      throw new Error('Expected isLowestCarbonSafe to be false');
+    }
+    if (ri.recommendedWindow.windowLabel !== 'T+2:00 → T+4:00') {
+      throw new Error(`Expected recommendedWindow "T+2:00 → T+4:00", got "${ri.recommendedWindow.windowLabel}"`);
+    }
+    if (ri.carbonInsurancePenaltyGramsPerKwh <= 0) {
+      throw new Error(`Expected positive carbonInsurancePenaltyGramsPerKwh, got ${ri.carbonInsurancePenaltyGramsPerKwh}`);
+    }
+    if (!ri.explanation || ri.explanation.length < 20) {
+      throw new Error('Missing or short research insight explanation');
+    }
+
+    console.log('\n      === 5 POLICIES ON CONTROLLED RESEARCH BENCHMARK ===');
+    console.log(`      1. Immediate:     T+${imm.selectedStartHour}:00 | ${imm.predictedCarbonIntensity} g/kWh | Risk: ${(imm.estimatedDeadlineRisk * 100).toFixed(1)}% | Status: ${imm.isFeasible ? 'Feasible' : 'REJECTED'}`);
+    console.log(`      2. EDF:           T+${edf.selectedStartHour}:00 | ${edf.predictedCarbonIntensity} g/kWh | Risk: ${(edf.estimatedDeadlineRisk * 100).toFixed(1)}% | Status: ${edf.isFeasible ? 'Feasible' : 'REJECTED'}`);
+    console.log(`      3. Greedy Delay:  T+${det.selectedStartHour}:00 | ${det.predictedCarbonIntensity} g/kWh | Risk: ${(det.estimatedDeadlineRisk * 100).toFixed(1)}% | Status: ${det.isFeasible ? 'Feasible' : 'REJECTED'}`);
+    console.log(`      4. Baseline:      T+${base.selectedStartHour}:00 | ${base.predictedCarbonIntensity} g/kWh | Risk: ${(base.estimatedDeadlineRisk * 100).toFixed(1)}% | Status: ${base.isFeasible ? 'Feasible' : 'REJECTED'}`);
+    console.log(`      5. CarbonRoute:   T+${cr.selectedStartHour}:00 | ${cr.predictedCarbonIntensity} g/kWh | Risk: ${(cr.estimatedDeadlineRisk * 100).toFixed(1)}% | Status: RECOMMENDED`);
+    console.log(`      Research Insight: Lowest Window ${ri.lowestCarbonWindow.windowLabel} (${ri.lowestCarbonWindow.predictedCarbonIntensity} g/kWh) REJECTED for risk ${(ri.lowestCarbonWindow.deadlineRisk * 100).toFixed(0)}%.`);
+    console.log(`      Safe Selection:   Window ${ri.recommendedWindow.windowLabel} (${ri.recommendedWindow.predictedCarbonIntensity} g/kWh) with +${ri.carbonInsurancePenaltyGramsPerKwh} g/kWh Carbon Insurance.`);
+  });
+
   console.log('\n========================================================');
   console.log(`🎯 Prototype Vertical Slice Test Results: ${passed} PASSED, ${failed} FAILED`);
   console.log('========================================================\n');

@@ -41,6 +41,22 @@ export const REGIONAL_PROFILES: Record<
   string,
   { name: string; baseCurve: number[]; baseStdDev: number[] }
 > = {
+  'BENCHMARK-RESEARCH': {
+    name: 'DEMO / BENCHMARK - Controlled Uncertainty Experiment',
+    // T+0 has relatively high carbon (340) and low uncertainty (10).
+    // T+2/T+3 has lower carbon (220-210) with acceptable risk (slack ~ 8h).
+    // T+10/T+11 has lowest predicted carbon (135-130), but high uncertainty (50-55) & 0-1h slack -> risk > tolerance!
+    baseCurve: [
+      340, 320, 220, 215, 230, 270, 310, 330, 210, 180,
+      135, 130, 160, 210, 260, 300, 340, 370, 360, 340,
+      320, 310, 300, 290,
+    ],
+    baseStdDev: [
+      10, 12, 15, 16, 18, 22, 26, 30, 36, 42,
+      50, 55, 58, 62, 65, 68, 72, 75, 78, 80,
+      82, 85, 88, 90,
+    ],
+  },
   'US-CAL-CISO': {
     name: 'California (CAISO)',
     // Solar duck-curve: high morning/evening carbon, steep clean solar drop during midday hours 10–16
@@ -105,15 +121,15 @@ export const REGIONAL_PROFILES: Record<
  */
 export class PreparedTraceDataProvider implements ICarbonDataProvider {
   public name = 'PreparedTraceDataProvider';
-  public source = 'Prepared Carbon Trace (UCS503 Calibration Benchmark)';
+  public source = 'Controlled Research Benchmark / Demo Trace';
   public dataMode: 'live' | 'demo' = 'demo';
 
   public async getForecast(
-    region: string = 'US-CAL-CISO',
+    region: string = 'BENCHMARK-RESEARCH',
     horizonHours: number = 24
   ): Promise<CarbonForecastData> {
     const validHorizon = Math.max(1, Math.min(48, Number(horizonHours) || 24));
-    const selectedRegion = REGIONAL_PROFILES[region] ? region : 'US-CAL-CISO';
+    const selectedRegion = REGIONAL_PROFILES[region] ? region : 'BENCHMARK-RESEARCH';
     const profile = REGIONAL_PROFILES[selectedRegion];
     const now = new Date();
 

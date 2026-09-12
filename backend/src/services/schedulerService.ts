@@ -60,6 +60,14 @@ export interface CandidateWindowEvaluation {
   reason: string;
 }
 
+export interface ResearchInsightLowestVsSafest {
+  lowestCarbonWindow: CandidateWindowEvaluation;
+  recommendedWindow: CandidateWindowEvaluation;
+  isLowestCarbonSafe: boolean;
+  carbonInsurancePenaltyGramsPerKwh: number;
+  explanation: string;
+}
+
 export interface SchedulingDecisionResponse {
   job: WorkloadJob;
   carbonSource: string;
@@ -73,6 +81,7 @@ export interface SchedulingDecisionResponse {
     delayPenaltyHours: number;
     riskDifferenceVsDeterministic: number;
   };
+  researchInsight?: ResearchInsightLowestVsSafest;
 }
 
 export class SchedulerService {
@@ -237,23 +246,42 @@ export class SchedulerService {
     };
 
     // -------------------------------------------------------------
-    // POLICY 4: CarbonAware Baseline (Fixed Static Safety Margin)
+    // POLICY 4: CarbonAware Baseline (Clean Threshold & Static Safety Margin)
     // -------------------------------------------------------------
     const startBase = performance.now();
-    // Conventional heuristic: reserves a static buffer (e.g. 2 hours or 20% of slack) before deadline
+    // Conventional heuristic: reserves a static buffer (e.g. 2 hours or 25% of slack) before deadline
     const staticBuffer = Math.max(1, Math.min(3, Math.round((ddl - (arrival + dur)) * 0.25)));
     const maxBaseSlot = Math.max(arrival, ddl - dur - staticBuffer);
-    let bestBaseSlot = arrival;
-    let minBaseCarbon = Infinity;
 
+    // Compute clean carbon threshold (25th percentile intensity of horizon points)
+    const sortedCarbons = points.map((p) => p.predictedCarbon ?? p.carbonIntensity ?? 250).sort((a, b) => a - b);
+    const cleanThreshold = sortedCarbons[Math.floor(sortedCarbons.length * 0.25)] || 220;
+
+    // Dispatches at the earliest window within safe buffer that meets the clean threshold
+    let bestBaseSlot = -1;
+    let minBaseCarbon = Infinity;
     for (let t = arrival; t <= maxBaseSlot; t++) {
       const { avgCarbon } = computeWindowMetrics(t);
       if (avgCarbon < minBaseCarbon) {
         minBaseCarbon = avgCarbon;
+      }
+      if (avgCarbon <= cleanThreshold && bestBaseSlot === -1) {
         bestBaseSlot = t;
       }
     }
-    const { avgStd: baseStd } = computeWindowMetrics(bestBaseSlot);
+    // If no window drops below cleanThreshold within staticBuffer, choose the minimum carbon within staticBuffer:
+    if (bestBaseSlot === -1) {
+      bestBaseSlot = arrival;
+      for (let t = arrival; t <= maxBaseSlot; t++) {
+        const { avgCarbon } = computeWindowMetrics(t);
+        if (avgCarbon === minBaseCarbon) {
+          bestBaseSlot = t;
+          break;
+        }
+      }
+    }
+
+    const { avgCarbon: baseCarbonVal, avgStd: baseStd } = computeWindowMetrics(bestBaseSlot);
     const baseRisk = UncertaintyService.calculateDeadlineRisk(
       bestBaseSlot,
       dur,
@@ -262,7 +290,6 @@ export class SchedulerService {
       uncertaintyMultiplier
     ).violationRisk;
     const overheadBase = Number((performance.now() - startBase).toFixed(2));
-    const baseCarbonVal = minBaseCarbon === Infinity ? immCarbon : minBaseCarbon;
 
     const baselinePolicy: PolicyEvaluationResult = {
       policyId: 'carbon_aware_baseline',
@@ -280,7 +307,7 @@ export class SchedulerService {
       waitingTimeHours: bestBaseSlot - arrival,
       isFeasible: bestBaseSlot + dur <= ddl && baseRisk <= tau,
       schedulerOverheadMs: overheadBase,
-      rationale: `Conventional heuristic: optimizes carbon within a fixed ${staticBuffer}h safety margin before deadline.`,
+      rationale: `Conventional heuristic: dispatches at earliest window (T+${bestBaseSlot}:00, ${baseCarbonVal} gCO2eq/kWh) satisfying clean threshold (<= ${cleanThreshold} gCO2eq/kWh) while keeping static ${staticBuffer}h safety margin.`,
     };
 
     // -------------------------------------------------------------
@@ -420,6 +447,37 @@ export class SchedulerService {
         ? Number((((immCarbon - optimalCandidate.predictedCarbonIntensity) / immCarbon) * 100).toFixed(1))
         : 0;
 
+    // -------------------------------------------------------------
+    // RESEARCH INSIGHT: Lowest Predicted Carbon vs Safest Feasible
+    // Explicitly demonstrates why the lowest-carbon window is not always the safest choice
+    // -------------------------------------------------------------
+    const lowestCarbonCandidate = candidateWindows.reduce((lowest, cur) => {
+      if (cur.predictedCarbonIntensity < lowest.predictedCarbonIntensity) return cur;
+      if (cur.predictedCarbonIntensity === lowest.predictedCarbonIntensity && cur.startHour < lowest.startHour) return cur;
+      return lowest;
+    }, candidateWindows[0]);
+
+    const isLowestCarbonSafe = lowestCarbonCandidate.deadlineRisk <= tau;
+    const carbonInsurancePenaltyGramsPerKwh = Math.max(
+      0,
+      optimalCandidate.predictedCarbonIntensity - lowestCarbonCandidate.predictedCarbonIntensity
+    );
+
+    let researchInsightExplanation = '';
+    if (!isLowestCarbonSafe) {
+      researchInsightExplanation = `The candidate window with the absolute lowest predicted grid carbon intensity is ${lowestCarbonCandidate.windowLabel} (${lowestCarbonCandidate.predictedCarbonIntensity} gCO2eq/kWh). However, due to lookahead forecast uncertainty (sigma ~ ±${lowestCarbonCandidate.stdDev} gCO2/kWh) and tight completion slack (${lowestCarbonCandidate.slackHours}h remaining before deadline T+${ddl}:00), its deadline-violation risk rises to ${lowestCarbonCandidate.deadlineRiskPct}, exceeding your ${(tau * 100).toFixed(0)}% risk tolerance. A greedy deterministic scheduler selects this risky cliff and suffers SLA breaches. In contrast, CarbonRoute rejects it and selects ${optimalCandidate.windowLabel} (${optimalCandidate.predictedCarbonIntensity} gCO2eq/kWh, ${optimalCandidate.deadlineRiskPct} risk), accepting an insurance margin of +${carbonInsurancePenaltyGramsPerKwh} gCO2eq/kWh to guarantee safe, on-time completion within your risk tolerance.`;
+    } else {
+      researchInsightExplanation = `The candidate window with the lowest predicted grid carbon intensity is ${lowestCarbonCandidate.windowLabel} (${lowestCarbonCandidate.predictedCarbonIntensity} gCO2eq/kWh). Its deadline-violation risk is ${lowestCarbonCandidate.deadlineRiskPct}, which is safely within your ${(tau * 100).toFixed(0)}% risk tolerance. CarbonRoute confirms that this window is both optimal and safe.`;
+    }
+
+    const researchInsight: ResearchInsightLowestVsSafest = {
+      lowestCarbonWindow: lowestCarbonCandidate,
+      recommendedWindow: optimalCandidate,
+      isLowestCarbonSafe,
+      carbonInsurancePenaltyGramsPerKwh,
+      explanation: researchInsightExplanation,
+    };
+
     return {
       job,
       carbonSource: source,
@@ -433,6 +491,7 @@ export class SchedulerService {
         delayPenaltyHours: optimalCandidate.waitingTimeHours,
         riskDifferenceVsDeterministic: Number(((detRisk - optimalCandidate.deadlineRisk) * 100).toFixed(1)),
       },
+      researchInsight,
     };
   }
 }

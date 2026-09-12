@@ -382,12 +382,13 @@ export const PrototypePage: React.FC = () => {
             <span className="text-slate-500">Presets:</span>
             <button
               type="button"
-              onClick={() =>
-                applyPreset('ResNet-50 ML Training', 'carbonroute/test-workload:latest', 2, 12, 1, 512, 0.05, 'US-CAL-CISO')
-              }
+              onClick={() => {
+                setDataSourceMode('demo');
+                applyPreset('ResNet-50 ML Training', 'carbonroute/test-workload:latest', 2, 12, 1, 512, 0.05, 'BENCHMARK-RESEARCH');
+              }}
               className="px-2.5 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300 hover:text-emerald-400 hover:border-emerald-500/40"
             >
-              1. ML Training
+              1. Controlled Benchmark Demo
             </button>
             <button
               type="button"
@@ -445,6 +446,11 @@ export const PrototypePage: React.FC = () => {
               onChange={(e) => setRegion(e.target.value)}
               className="w-full px-3.5 py-2.5 rounded-lg bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500"
             >
+              {dataSourceMode === 'demo' && (
+                <option value="BENCHMARK-RESEARCH">
+                  DEMO / BENCHMARK - Controlled Uncertainty Experiment
+                </option>
+              )}
               <option value="US-CAL-CISO">California (CAISO) — Solar duck-curve</option>
               <option value="US-TEX-ERCO">Texas (ERCOT) — Overnight wind surges</option>
               <option value="DE">Germany (Central Europe) — Mixed wind &amp; solar</option>
@@ -469,11 +475,19 @@ export const PrototypePage: React.FC = () => {
             </div>
             <select
               value={dataSourceMode}
-              onChange={(e) => setDataSourceMode(e.target.value as 'live' | 'demo')}
+              onChange={(e) => {
+                const newMode = e.target.value as 'live' | 'demo';
+                setDataSourceMode(newMode);
+                if (newMode === 'demo' && (region === 'US-CAL-CISO' || !region)) {
+                  setRegion('BENCHMARK-RESEARCH');
+                } else if (newMode === 'live' && region === 'BENCHMARK-RESEARCH') {
+                  setRegion('US-CAL-CISO');
+                }
+              }}
               className="w-full px-3.5 py-2.5 rounded-lg bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500"
             >
-              <option value="live">Live Electricity Maps API (Default / Production)</option>
-              <option value="demo">Prepared Benchmark Trace (Demo / Tests)</option>
+              <option value="live">Live Electricity Maps API (Production)</option>
+              <option value="demo">Controlled Research Benchmark / Demo Trace</option>
             </select>
             <span className="text-[10px] text-slate-500 block">
               {dataSourceMode === 'live'
@@ -596,9 +610,16 @@ export const PrototypePage: React.FC = () => {
             </div>
 
             <div className="inline-flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs font-mono">
-              <span className="w-2 h-2 rounded-full bg-emerald-400" />
+              <span className={`w-2 h-2 rounded-full ${forecast.dataMode === 'live' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
               <span className="text-slate-400">Source:</span>
               <strong className="text-white">{forecast.source}</strong>
+              <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${
+                forecast.dataMode === 'live'
+                  ? 'bg-emerald-950 text-emerald-300 border border-emerald-500/40'
+                  : 'bg-amber-950 text-amber-300 border border-amber-500/40'
+              }`}>
+                {forecast.dataMode === 'live' ? 'LIVE ELECTRICITY MAPS' : 'CONTROLLED RESEARCH BENCHMARK'}
+              </span>
             </div>
           </div>
 
@@ -1107,6 +1128,181 @@ export const PrototypePage: React.FC = () => {
               </div>
             );
           })()}
+
+          {/* RESEARCH INSIGHT: LOWEST PREDICTED CARBON IS NOT ALWAYS THE SAFEST SCHEDULING DECISION */}
+          {decision.researchInsight && (
+            <div className="glass-card rounded-2xl p-6 sm:p-8 border-2 border-indigo-500/40 bg-gradient-to-b from-indigo-950/20 to-slate-900/80 shadow-2xl space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-indigo-500/30 gap-3">
+                <div className="space-y-1">
+                  <div className="flex items-center space-x-2">
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-500 text-slate-950 uppercase tracking-wider">
+                      RESEARCH INSIGHT
+                    </span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-indigo-950/80 text-indigo-300 border border-indigo-500/30">
+                      Carbon vs. Operational Safety
+                    </span>
+                  </div>
+                  <h3 className="text-lg sm:text-xl font-extrabold text-white font-mono">
+                    Lowest Predicted Carbon is Not Always the Safest Scheduling Decision
+                  </h3>
+                  <p className="text-xs text-slate-400 font-mono">
+                    Why greedy delay fails in real-world grid operations: comparing the unconstrained carbon minimum against CarbonRoute's risk-bounded dispatch.
+                  </p>
+                </div>
+                <div className="inline-flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-indigo-950/80 border border-indigo-500/40 text-xs font-mono text-indigo-300 shrink-0">
+                  <ShieldCheck className="w-4 h-4 text-indigo-400" />
+                  <span>Max Risk Bound &tau; = {(riskTolerance * 100).toFixed(0)}%</span>
+                </div>
+              </div>
+
+              {(() => {
+                const ri = decision.researchInsight;
+                const lowWin = ri.lowestCarbonWindow;
+                const recWin = ri.recommendedWindow;
+                const carbonDeltaGrams = Math.max(
+                  0,
+                  Math.round((recWin.predictedCarbonImpactGrams - lowWin.predictedCarbonImpactGrams) * 10) / 10
+                );
+
+                return (
+                  <>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 font-mono">
+                      {/* Candidate 1: Absolute Lowest Predicted Carbon */}
+                      <div className="p-5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-4 flex flex-col justify-between">
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                              Unconstrained Carbon Minimum
+                            </span>
+                            {ri.isLowestCarbonSafe ? (
+                              <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-950 border border-emerald-500/40 text-emerald-300 font-bold uppercase">
+                                Feasible &amp; Safe
+                              </span>
+                            ) : (
+                              <span className="text-[10px] px-2 py-0.5 rounded bg-rose-950 border border-rose-500/40 text-rose-300 font-bold uppercase flex items-center space-x-1">
+                                <AlertCircle className="w-3 h-3 text-rose-400" />
+                                <span>Rejected by CarbonRoute</span>
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xl font-extrabold text-white">
+                            Window {lowWin.windowLabel}
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2 text-xs pt-1">
+                            <div className="p-2.5 bg-slate-900/80 rounded-lg border border-slate-800/80">
+                              <span className="text-slate-500 block text-[10px]">Grid Intensity:</span>
+                              <span className="text-white font-bold text-sm">
+                                {lowWin.predictedCarbonIntensity}{' '}
+                                <span className="text-[10px] font-normal text-slate-400">gCO2eq/kWh</span>
+                              </span>
+                            </div>
+                            <div className="p-2.5 bg-slate-900/80 rounded-lg border border-slate-800/80">
+                              <span className="text-slate-500 block text-[10px]">Est. Workload Emissions:</span>
+                              <span className="text-white font-bold text-sm">
+                                {lowWin.predictedCarbonImpactGrams}{' '}
+                                <span className="text-[10px] font-normal text-slate-400">gCO2eq</span>
+                              </span>
+                            </div>
+                            <div className="p-2.5 bg-slate-900/80 rounded-lg border border-slate-800/80">
+                              <span className="text-slate-500 block text-[10px]">Forecast Uncertainty:</span>
+                              <span className="text-slate-300 font-bold text-sm">
+                                &plusmn;{lowWin.stdDev.toFixed(1)}{' '}
+                                <span className="text-[10px] font-normal text-slate-500">(&sigma;)</span>
+                              </span>
+                            </div>
+                            <div className="p-2.5 bg-slate-900/80 rounded-lg border border-slate-800/80">
+                              <span className="text-slate-500 block text-[10px]">Deadline Risk P(viol):</span>
+                              <span
+                                className={`font-bold text-sm ${
+                                  lowWin.deadlineRisk > riskTolerance
+                                    ? 'text-rose-400'
+                                    : 'text-emerald-400'
+                                }`}
+                              >
+                                {lowWin.deadlineRiskPct}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="pt-3 border-t border-slate-800/80 text-[11px] text-slate-400 leading-relaxed">
+                          {ri.isLowestCarbonSafe
+                            ? 'This window is both the lowest predicted carbon window and complies with the deadline risk constraint.'
+                            : `Greedy deterministic schedulers pick this window because ${lowWin.predictedCarbonIntensity} gCO2eq/kWh looks cheapest, but waiting until ${lowWin.windowLabel} leaves near-zero slack margin and escalates deadline failure probability to ${lowWin.deadlineRiskPct}.`}
+                        </div>
+                      </div>
+
+                      {/* Candidate 2: CarbonRoute Risk-Bounded Selection */}
+                      <div className="p-5 rounded-xl bg-slate-950/80 border-2 border-emerald-500/50 space-y-4 flex flex-col justify-between shadow-lg shadow-emerald-950/40 relative">
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                              CarbonRoute Safe Dispatch
+                            </span>
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500 text-slate-950 font-bold uppercase flex items-center space-x-1">
+                              <CheckCircle className="w-3 h-3 text-slate-950" />
+                              <span>Recommended Choice</span>
+                            </span>
+                          </div>
+                          <div className="text-xl font-extrabold text-emerald-300">
+                            Window {recWin.windowLabel}
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2 text-xs pt-1">
+                            <div className="p-2.5 bg-slate-900/80 rounded-lg border border-emerald-500/30">
+                              <span className="text-slate-500 block text-[10px]">Selected Intensity:</span>
+                              <span className="text-emerald-300 font-bold text-sm">
+                                {recWin.predictedCarbonIntensity}{' '}
+                                <span className="text-[10px] font-normal text-slate-400">gCO2eq/kWh</span>
+                              </span>
+                            </div>
+                            <div className="p-2.5 bg-slate-900/80 rounded-lg border border-emerald-500/30">
+                              <span className="text-slate-500 block text-[10px]">Est. Workload Emissions:</span>
+                              <span className="text-white font-bold text-sm">
+                                {recWin.predictedCarbonImpactGrams}{' '}
+                                <span className="text-[10px] font-normal text-slate-400">gCO2eq</span>
+                              </span>
+                            </div>
+                            <div className="p-2.5 bg-slate-900/80 rounded-lg border border-slate-800/80">
+                              <span className="text-slate-500 block text-[10px]">Deadline Risk P(viol):</span>
+                              <span className="text-emerald-400 font-bold text-sm">
+                                {recWin.deadlineRiskPct} &le; {(riskTolerance * 100).toFixed(0)}%
+                              </span>
+                            </div>
+                            <div className="p-2.5 bg-slate-900/80 rounded-lg border border-slate-800/80">
+                              <span className="text-slate-500 block text-[10px]">Carbon Insurance Delta:</span>
+                              <span className="text-indigo-300 font-bold text-sm">
+                                +{ri.carbonInsurancePenaltyGramsPerKwh}{' '}
+                                <span className="text-[10px] font-normal text-slate-400">g/kWh</span>
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="pt-3 border-t border-emerald-500/20 text-[11px] text-emerald-200/90 leading-relaxed">
+                          {ri.isLowestCarbonSafe
+                            ? 'Selected as the mathematically optimal and safe window without requiring any carbon insurance trade-off.'
+                            : `CarbonRoute pays an intentional "carbon insurance" premium of +${ri.carbonInsurancePenaltyGramsPerKwh} gCO2eq/kWh (+${carbonDeltaGrams} gCO2eq total) to guarantee mathematical deadline safety while still capturing major emissions reductions.`}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Scientific Takeaway Banner */}
+                    <div className="p-4 rounded-xl bg-indigo-950/40 border border-indigo-500/30 flex items-start space-x-3 text-xs font-mono">
+                      <Info className="w-5 h-5 text-indigo-400 shrink-0 mt-0.5" />
+                      <div className="space-y-1 text-slate-200">
+                        <span className="font-bold text-indigo-300 block">Scientific Takeaway:</span>
+                        <p className="leading-relaxed text-slate-300">
+                          {ri.explanation}
+                        </p>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          )}
 
           {/* 5 Schedulers Policy Comparison Table */}
           <div className="glass-card rounded-2xl p-6 sm:p-8 border border-slate-800 space-y-4">

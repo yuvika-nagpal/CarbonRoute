@@ -14,10 +14,11 @@ export const simulateFeasibilityDecision = async (req: Request, res: Response) =
     const durationHours = Math.max(1, Math.min(6, Math.round(Number(req.body.durationHours) || 2)));
     const deadlineHours = Math.max(durationHours + 1, Math.min(18, Math.round(Number(req.body.deadlineHours) || 12)));
     const riskTolerance = Math.max(0.01, Math.min(0.50, Number(req.body.riskTolerance) || 0.10));
-    const region = String(req.body.region || 'US-CAL-CISO');
+    const region = String(req.body.region || 'BENCHMARK-RESEARCH');
 
-    // Retrieve forecast trace for the region
-    const forecastData = await CarbonService.getForecast(region, 12);
+    // Retrieve controlled forecast trace for the research demonstration
+    // Explicitly uses mode: 'demo' so the experiment is 100% reproducible and independent of live API key status
+    const forecastData = await CarbonService.getForecast(region, 12, 'demo');
     const horizon = 12;
 
     // Dynamically compute candidate time slots from actual forecast and mathematical uncertainty models
@@ -35,8 +36,8 @@ export const simulateFeasibilityDecision = async (req: Request, res: Response) =
       const avgCarbon = Math.round(sumCarbon / durationHours);
       const avgStd = Math.round(sumStd / durationHours);
 
-      const riskLow = UncertaintyService.calculateDeadlineRisk(h, durationHours, deadlineHours, avgStd, 0.7);
-      const riskHigh = UncertaintyService.calculateDeadlineRisk(h, durationHours, deadlineHours, avgStd, 2.4);
+      const riskLow = UncertaintyService.calculateDeadlineRisk(h, durationHours, deadlineHours, avgStd, 0.6);
+      const riskHigh = UncertaintyService.calculateDeadlineRisk(h, durationHours, deadlineHours, avgStd, 2.5);
 
       timeSlots.push({
         hour: h,
