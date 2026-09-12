@@ -1,70 +1,107 @@
 /**
  * Uncertainty & Risk Calibration Engine
- * Implements Gaussian tail error modeling and horizon-dependent forecast variance growth.
+ *
+ * Mathematical / Statistical Model:
+ * This model estimates the probability of deadline violation P(T_finish > Deadline)
+ * using a Gaussian tail approximation evaluated through the complementary error function (erfc).
+ *
+ * 1. Intrinsic Runtime Variance:
+ *    Batch workload execution duration exhibits intrinsic runtime jitter due to cache,
+ *    I/O, and CPU resource contention:
+ *    sigma_runtime = 0.15 * durationHours (std dev is ~15% of nominal duration)
+ *
+ * 2. Look-Ahead Horizon Dispersion:
+ *    As dispatch is deferred into the future, temporal arrival uncertainty and grid forecast
+ *    variance expand according to a sub-linear horizon dispersion model:
+ *    sigma_horizon(t) = (baseCarbonStdDev / 100) * sqrt(t)
+ *
+ * 3. Total Completion Variance:
+ *    sigma_completion = max(0.25, (sigma_runtime + sigma_horizon) * max(0.2, uncertaintyMultiplier))
+ *
+ * 4. Temporal Slack:
+ *    slack = deadlineHours - (startHour + durationHours)
+ *    If slack < 0: P(violation) = 1.0 (deterministic deadline violation)
+ *
+ * 5. Normalized Z-Score & Tail Risk:
+ *    z = slack / sigma_completion
+ *    P(violation) = 0.5 * erfc(z / sqrt(2))
+ *
+ * NOTE: This is a defensible statistical/probabilistic uncertainty model based on
+ * Chebyshev rational erfc approximation (error < 1.2e-7), NOT an empirical trained ML model.
  */
+
+export interface DeadlineRiskResult {
+  violationRisk: number; // Probability in [0, 1]
+  effectiveStdDev: number; // Effective completion time standard deviation in hours
+  slackHours: number; // Available buffer before deadline in hours
+  zScore: number; // Standardized score
+}
+
 export class UncertaintyService {
   /**
-   * Evaluates the cumulative probability of a deadline violation given:
-   * @param startHour Scheduled start time slot (hours from arrival)
-   * @param durationHours Job run duration (hours)
-   * @param deadlineHours Absolute deadline limit (hours)
-   * @param baseStdDev Standard deviation of the forecast error at the scheduled slot
-   * @param uncertaintyScale Multiplier to simulate varying uncertainty scenarios (e.g. 1.0 for low, 3.5 for high)
+   * Evaluates the cumulative probability of deadline breach P(T_finish > deadlineHours)
    */
   public static calculateDeadlineRisk(
     startHour: number,
     durationHours: number,
     deadlineHours: number,
-    baseStdDev: number,
-    uncertaintyScale: number = 1.0
-  ): { violationRisk: number; effectiveStdDev: number; slackHours: number; zScore: number } {
-    const slack = deadlineHours - (startHour + durationHours);
+    baseCarbonStdDev: number = 20,
+    uncertaintyMultiplier: number = 1.0
+  ): DeadlineRiskResult {
+    const slack = Number((deadlineHours - (startHour + durationHours)).toFixed(2));
 
-    // If already infeasible by deterministic deadline constraint
+    // If already infeasible by deterministic constraint
     if (slack < 0) {
       return {
         violationRisk: 1.0,
-        effectiveStdDev: Number((baseStdDev * uncertaintyScale).toFixed(2)),
-        slackHours: Number(slack.toFixed(2)),
+        effectiveStdDev: 99.0,
+        slackHours: slack,
         zScore: -999,
       };
     }
 
-    // Effective completion-time standard deviation in hours
-    // Accounts for intrinsic runtime variance (15% of duration) + horizon arrival jitter
-    const runtimeStdDev = Math.max(0.2, 0.15 * durationHours);
-    const horizonJitter = 0.08 * Math.sqrt(Math.max(0, startHour));
-    const effectiveTimeStdDev = Math.max(0.25, (runtimeStdDev + horizonJitter) * Math.max(0.5, uncertaintyScale));
+    // 1. Intrinsic duration variance (15% of duration, min 0.2h)
+    const sigmaRuntime = Math.max(0.2, 0.15 * durationHours);
 
-    // Z-score: how many standard deviations of slack remain
+    // 2. Horizon schedule drift (scales with sqrt(t) and grid forecast uncertainty)
+    const carbonScale = Math.max(0.1, Number(baseCarbonStdDev || 20) / 100);
+    const sigmaHorizon = carbonScale * Math.sqrt(Math.max(0, startHour));
+
+    // 3. Combined completion time variance scaled by user/scenario multiplier
+    const effectiveTimeStdDev = Math.max(
+      0.25,
+      (sigmaRuntime + sigmaHorizon) * Math.max(0.2, Number(uncertaintyMultiplier) || 1.0)
+    );
+
+    // 4. Standard score
     const zScore = slack / effectiveTimeStdDev;
 
-    // Erfc approximation for standard normal complementary cumulative distribution tail
+    // 5. Tail probability via complementary error function
     const violationRisk = Math.min(1.0, Math.max(0.0, 0.5 * this.erfc(zScore / Math.SQRT2)));
 
     return {
       violationRisk: Number(violationRisk.toFixed(4)),
       effectiveStdDev: Number(effectiveTimeStdDev.toFixed(2)),
-      slackHours: Number(slack.toFixed(2)),
+      slackHours: slack,
       zScore: Number(zScore.toFixed(3)),
     };
   }
 
   /**
-   * Calculates carbon forecast uncertainty standard deviation widening over look-ahead horizon
+   * Computes widening forecast uncertainty standard deviation over look-ahead horizon
    */
   public static calculateHorizonStdDev(
     horizonHour: number,
     baseStdDev: number = 15,
-    growthRate: number = 0.20
+    growthRate: number = 0.18
   ): number {
-    const sigma = baseStdDev * (1.0 + growthRate * Math.sqrt(Math.max(0, horizonHour)));
+    const sigma = Number(baseStdDev) * (1.0 + growthRate * Math.sqrt(Math.max(0, Number(horizonHour))));
     return Number(sigma.toFixed(2));
   }
 
   /**
    * Approximates the complementary error function erfc(x)
-   * Chebyshev fitting approximation accurate to 1.2e-7
+   * Chebyshev rational polynomial approximation accurate to 1.2e-7
    */
   public static erfc(x: number): number {
     if (x < 0) {
@@ -92,4 +129,29 @@ export class UncertaintyService {
       );
     return tau;
   }
+}
+
+// Export top-level convenience functions
+export function calculateDeadlineRisk(
+  startHour: number,
+  durationHours: number,
+  deadlineHours: number,
+  baseCarbonStdDev?: number,
+  uncertaintyMultiplier?: number
+): DeadlineRiskResult {
+  return UncertaintyService.calculateDeadlineRisk(
+    startHour,
+    durationHours,
+    deadlineHours,
+    baseCarbonStdDev,
+    uncertaintyMultiplier
+  );
+}
+
+export function calculateHorizonStdDev(
+  horizonHour: number,
+  baseStdDev?: number,
+  growthRate?: number
+): number {
+  return UncertaintyService.calculateHorizonStdDev(horizonHour, baseStdDev, growthRate);
 }

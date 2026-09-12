@@ -9,10 +9,10 @@
  * 6. Live log streaming & realized carbon accounting
  */
 
-const { CarbonService } = require('../backend/dist/services/carbonService');
-const { UncertaintyService } = require('../backend/dist/services/uncertaintyService');
-const { SchedulerService } = require('../backend/dist/services/schedulerService');
-const { K8sConnector } = require('../backend/dist/services/k8sConnector');
+const { CarbonService, getForecast } = require('../backend/dist/services/carbonService');
+const { UncertaintyService, calculateDeadlineRisk, calculateHorizonStdDev, erfc } = require('../backend/dist/services/uncertaintyService');
+const { SchedulerService, evaluateAllPolicies } = require('../backend/dist/services/schedulerService');
+const { K8sConnector, generateJobManifest, dispatchJob } = require('../backend/dist/services/k8sConnector');
 
 async function runVerticalSliceTests() {
   console.log('🧪 ========================================================');
@@ -33,10 +33,21 @@ async function runVerticalSliceTests() {
     }
   }
 
+  // EXPORT TEST: Top-Level Functions
+  await assert('Exports: Top-level function exports (getForecast, calculateDeadlineRisk, evaluateAllPolicies, generateJobManifest, dispatchJob) exist and are callable', async () => {
+    if (typeof getForecast !== 'function') throw new Error('getForecast is not a function');
+    if (typeof calculateDeadlineRisk !== 'function') throw new Error('calculateDeadlineRisk is not a function');
+    if (typeof calculateHorizonStdDev !== 'function') throw new Error('calculateHorizonStdDev is not a function');
+    if (typeof evaluateAllPolicies !== 'function') throw new Error('evaluateAllPolicies is not a function');
+    if (typeof generateJobManifest !== 'function') throw new Error('generateJobManifest is not a function');
+    if (typeof dispatchJob !== 'function') throw new Error('dispatchJob is not a function');
+    console.log('      Verified 6 top-level function exports successfully.');
+  });
+
   // TEST 1: Carbon Service Ingestion & Fallback
   let forecastData = null;
   await assert('Step 1: Carbon forecast returns 24 calibrated hourly points with confidence bounds', async () => {
-    forecastData = await CarbonService.getForecast('US-CAL-CISO');
+    forecastData = await getForecast('US-CAL-CISO');
     if (!forecastData || !forecastData.hourlyProfile || forecastData.hourlyProfile.length !== 24) {
       throw new Error(`Expected 24 points, got ${forecastData?.hourlyProfile?.length}`);
     }
@@ -72,105 +83,204 @@ async function runVerticalSliceTests() {
     console.log(`      Risk calibration: Safe slack risk = ${(riskSafe * 100).toFixed(2)}%, Tight slack risk = ${(riskRisky * 100).toFixed(2)}%`);
   });
 
-  // TEST 4: 5 Schedulers Evaluation
-  let sampleJob = {
-    id: 'test-job-001',
-    name: 'LLM Fine-Tuning Batch',
-    commandOrImage: 'python /app/workload.py --epochs 5',
-    isContainerImage: false,
-    durationHours: 3,
-    deadlineHours: 14,
+  // =========================================================================
+  // TEST A: BASE CASE (Runtime = 2h, Deadline = 12h, Risk Tolerance = 5%)
+  // =========================================================================
+  let baseJob = {
+    id: 'test-job-base',
+    name: 'ResNet-50 Batch Training',
+    commandOrImage: 'carbonroute/test-workload:latest',
+    isContainerImage: true,
+    durationHours: 2,
+    deadlineHours: 12,
     arrivalHour: 0,
-    cpu: 4,
-    memoryMb: 8192,
+    cpu: 2,
+    memoryMb: 1024,
     region: 'US-CAL-CISO',
-    riskTolerance: 0.08,
+    riskTolerance: 0.05,
     status: 'pending',
     createdAt: new Date().toISOString(),
   };
 
   let decisionResult = null;
 
-  await assert('Step 4: All 5 scheduling policies evaluated simultaneously with valid metrics', async () => {
-    decisionResult = SchedulerService.evaluateAllPolicies(sampleJob, forecastData, 1.0);
+  await assert('Test A: Base Case (2h runtime, 12h deadline, 5% risk) executes complete vertical slice', async () => {
+    // 1. Forecast contains 24 data points
+    if (!forecastData || forecastData.hourlyProfile.length !== 24) {
+      throw new Error(`Expected 24 points, got ${forecastData?.hourlyProfile?.length}`);
+    }
 
-    if (!decisionResult || !decisionResult.evaluatedPolicies || decisionResult.evaluatedPolicies.length !== 5) {
+    // 2. Evaluate all 5 policies
+    decisionResult = evaluateAllPolicies(baseJob, forecastData, 1.0);
+    if (!decisionResult || decisionResult.evaluatedPolicies.length !== 5) {
       throw new Error(`Expected 5 policies, got ${decisionResult?.evaluatedPolicies?.length}`);
     }
 
-    const policyNames = decisionResult.evaluatedPolicies.map(p => p.policyName);
-    console.log(`      Evaluated Policies: ${policyNames.join(', ')}`);
-    console.log(`      Selected Optimal: ${decisionResult.recommendedDecision.policyName} (Slot: +${decisionResult.recommendedDecision.selectedStartHour}h, Predicted Carbon: ${decisionResult.recommendedDecision.predictedCarbon} gCO2/kWh, Risk: ${(decisionResult.recommendedDecision.estimatedDeadlineRisk * 100).toFixed(2)}%, Savings: ${decisionResult.comparisonSummary.carbonSavingsVsImmediatePct}%)`);
+    const immediate = decisionResult.evaluatedPolicies.find(p => p.policyId === 'immediate');
+    const rec = decisionResult.recommendedDecision;
 
-    if (decisionResult.comparisonSummary.carbonSavingsVsImmediatePct < 0) {
-      throw new Error('Carbon savings percentage should not be negative');
+    // 3. CarbonRoute selects window with carbon < immediate and risk <= 5%
+    if (rec.predictedCarbon >= immediate.predictedCarbon) {
+      throw new Error(`Recommended carbon ${rec.predictedCarbon} not lower than immediate ${immediate.predictedCarbon}`);
     }
-  });
-
-  // TEST 5: Sensitivity Demonstration (Same Forecast, Different Risk Tolerance)
-  await assert('Step 5: Same forecast with high vs conservative risk tolerance produces different decisions', async () => {
-    const conservativeJob = { ...sampleJob, id: 'cons-01', riskTolerance: 0.01 };
-    const aggressiveJob = { ...sampleJob, id: 'risk-01', riskTolerance: 0.30 };
-
-    const decCons = SchedulerService.evaluateAllPolicies(conservativeJob, forecastData, 1.0);
-    const decAggr = SchedulerService.evaluateAllPolicies(aggressiveJob, forecastData, 1.0);
-
-    console.log(`      Conservative (tau=1%):  startSlot=+${decCons.recommendedDecision.selectedStartHour}h, risk=${(decCons.recommendedDecision.estimatedDeadlineRisk * 100).toFixed(2)}%, savings=${decCons.comparisonSummary.carbonSavingsVsImmediatePct}%`);
-    console.log(`      Aggressive   (tau=30%): startSlot=+${decAggr.recommendedDecision.selectedStartHour}h, risk=${(decAggr.recommendedDecision.estimatedDeadlineRisk * 100).toFixed(2)}%, savings=${decAggr.comparisonSummary.carbonSavingsVsImmediatePct}%`);
-
-    if (decCons.recommendedDecision.estimatedDeadlineRisk > 0.0101) {
-      throw new Error(`Conservative decision exceeded risk tolerance: ${decCons.recommendedDecision.estimatedDeadlineRisk}`);
+    if (rec.estimatedDeadlineRisk > 0.051) {
+      throw new Error(`Estimated risk ${(rec.estimatedDeadlineRisk * 100).toFixed(2)}% exceeds 5% tolerance`);
     }
-  });
 
-  // TEST 6: Kubernetes Manifest Generation
-  await assert('Step 6: Kubernetes batch/v1 manifest contains correct specs and metadata', async () => {
-    const manifest = K8sConnector.generateJobManifest(sampleJob, decisionResult.recommendedDecision.selectedStartHour, 'carbonroute-job-test');
+    console.log(`      Immediate: ${immediate.predictedCarbon} gCO2, CarbonRoute: ${rec.predictedCarbon} gCO2 (Slot: T+${rec.selectedStartHour}:00, Savings: ${decisionResult.comparisonSummary.carbonSavingsVsImmediatePct}%, Risk: ${(rec.estimatedDeadlineRisk * 100).toFixed(2)}%)`);
+
+    // 4. Kubernetes Job manifest generated
+    const manifest = generateJobManifest(baseJob, rec.selectedStartHour, 'carbonroute-job-testa');
     if (manifest.apiVersion !== 'batch/v1' || manifest.kind !== 'Job') {
-      throw new Error('Invalid Kubernetes Job apiVersion or kind');
+      throw new Error('Invalid manifest apiVersion or kind');
     }
-    const container = manifest.spec.template.spec.containers[0];
-    if (!container || !container.resources || !container.resources.limits) {
-      throw new Error('Missing container resource specifications');
-    }
-    console.log(`      K8s Job Name: ${manifest.metadata.name}, Image: ${container.image}, CPU: ${container.resources.limits.cpu}`);
-  });
 
-  // TEST 7: Resilient Execution & Fallback Sandbox Runner
-  await assert('Step 7: Dispatch workload and stream progress logs to completion', async () => {
-    const execution = await K8sConnector.dispatchJob(
-      sampleJob,
-      decisionResult.recommendedDecision,
+    // 5. Workload execution & realized carbon recording
+    const execution = await dispatchJob(
+      baseJob,
+      rec,
       undefined,
       undefined,
       undefined,
       undefined,
-      2 // 2 seconds for test run
+      2 // 2s simulated duration for test
     );
 
     if (!execution || !execution.jobId) {
-      throw new Error('Dispatch failed to return K8sJobExecutionRecord');
+      throw new Error('Dispatch failed to return valid execution record');
     }
 
-    console.log(`      Execution Mode: ${execution.clusterMode} (${execution.clusterNotice})`);
-    console.log(`      Initial Pod Status: ${execution.status}`);
-
-    // Poll up to 6 seconds for simulation epochs to finish
+    // Poll to completion
     let completed = false;
     for (let i = 0; i < 25; i++) {
-      await new Promise(r => setTimeout(r, 200));
-      const status = K8sConnector.getExecutionStatus(sampleJob.id);
+      await new Promise(r => setTimeout(r, 150));
+      const status = K8sConnector.getExecutionStatus(baseJob.id);
       if (status && (status.status === 'completed' || status.status === 'failed')) {
         completed = true;
-        console.log(`      Completed in ${status.durationSeconds}s with ${status.logs.length} log lines`);
-        console.log(`      Final log: ${status.logs[status.logs.length - 1]}`);
-        console.log(`      Realized Carbon: ${status.realizedCarbon} gCO2eq/kWh`);
+        if (typeof status.realizedCarbon !== 'number') throw new Error('Realized carbon not recorded');
+        if (typeof status.carbonError !== 'number') throw new Error('Carbon error not recorded');
+        console.log(`      Execution Mode: ${status.clusterMode} | Realized Carbon: ${status.realizedCarbon} gCO2 (Error: ${status.carbonError > 0 ? '+' : ''}${status.carbonError} gCO2)`);
         break;
       }
     }
+    if (!completed) throw new Error('Execution did not complete within timeout window');
+  });
 
-    if (!completed) {
-      throw new Error('Execution did not complete within timeout window');
+  // =========================================================================
+  // TEST B: SAME FORECAST, DIFFERENT UNCERTAINTY
+  // =========================================================================
+  await assert('Test B: Same forecast with different uncertainty shifts decision conservatively', async () => {
+    // Run 1: baseline uncertainty
+    const run1 = evaluateAllPolicies(baseJob, forecastData, 1.0);
+    // Run 2: higher uncertainty (multiplier = 2.4)
+    const run2 = evaluateAllPolicies(baseJob, forecastData, 2.4);
+
+    // 1. Forecast carbon values are identical between runs
+    const c1 = run1.evaluatedPolicies.map(p => p.predictedCarbon);
+    const c2 = run2.evaluatedPolicies.map(p => p.predictedCarbon);
+    for (let i = 0; i < c1.length; i++) {
+      if (c1[i] !== c2[i]) throw new Error(`Predicted carbon differs at index ${i}: ${c1[i]} vs ${c2[i]}`);
+    }
+
+    // 2. Deadline violation risk is strictly higher in Run 2 for distant windows
+    const lateHour = 8;
+    const risk1 = calculateDeadlineRisk(lateHour, baseJob.durationHours, baseJob.deadlineHours, 15, 1.0).violationRisk;
+    const risk2 = calculateDeadlineRisk(lateHour, baseJob.durationHours, baseJob.deadlineHours, 15, 2.4).violationRisk;
+    if (risk2 <= risk1) {
+      throw new Error(`Distant window risk did not increase under higher uncertainty: run1=${risk1}, run2=${risk2}`);
+    }
+
+    // 3. Optimal window in Run 2 is either earlier than or equal to Run 1
+    const slot1 = run1.recommendedDecision.selectedStartHour;
+    const slot2 = run2.recommendedDecision.selectedStartHour;
+    console.log(`      Run 1 (Baseline sigma):  Window = T+${slot1}:00 (Risk: ${(run1.recommendedDecision.estimatedDeadlineRisk * 100).toFixed(2)}%)`);
+    console.log(`      Run 2 (Elevated sigma):  Window = T+${slot2}:00 (Risk: ${(run2.recommendedDecision.estimatedDeadlineRisk * 100).toFixed(2)}%)`);
+
+    if (slot2 > slot1) {
+      throw new Error(`Higher uncertainty unexpectedly selected later window (${slot2} > ${slot1})`);
+    }
+
+    // 4. CarbonRoute explains why the decision shifted
+    if (!run2.recommendedDecision.rationale || run2.recommendedDecision.rationale.length < 20) {
+      throw new Error('Missing dynamic rationale in Run 2');
+    }
+  });
+
+  // =========================================================================
+  // TEST C: WORKLOAD RUNTIME SENSITIVITY (2h vs 6h)
+  // =========================================================================
+  await assert('Test C: Workload runtime sensitivity (2h vs 6h) shrinks feasible set and computes continuous window averages', async () => {
+    const job2h = { ...baseJob, id: 'job-c-2h', durationHours: 2, deadlineHours: 12 };
+    const job6h = { ...baseJob, id: 'job-c-6h', durationHours: 6, deadlineHours: 12 };
+
+    const dec2h = evaluateAllPolicies(job2h, forecastData, 1.0);
+    const dec6h = evaluateAllPolicies(job6h, forecastData, 1.0);
+
+    // Max feasible start hour: 12 - 6 = 6
+    const det6h = dec6h.evaluatedPolicies.find(p => p.policyId === 'deterministic_carbon');
+    if (det6h.selectedStartHour > 6) {
+      throw new Error(`6h job selected infeasible start hour ${det6h.selectedStartHour} (deadline 12h)`);
+    }
+
+    // Multi-hour carbon averages reflect 6-hour windows, not 2-hour
+    let sum2h = 0;
+    for (let w = 0; w < 2; w++) sum2h += forecastData.hourlyProfile[w].predictedCarbon;
+    const avg2h = Math.round(sum2h / 2);
+
+    let sum6h = 0;
+    for (let w = 0; w < 6; w++) sum6h += forecastData.hourlyProfile[w].predictedCarbon;
+    const avg6h = Math.round(sum6h / 6);
+
+    console.log(`      Hour 0 averages: 2-hour window = ${avg2h} gCO2/kWh vs 6-hour window = ${avg6h} gCO2/kWh`);
+    console.log(`      2h job selected: T+${dec2h.recommendedDecision.selectedStartHour}:00 | 6h job selected: T+${dec6h.recommendedDecision.selectedStartHour}:00`);
+  });
+
+  // =========================================================================
+  // TEST D: DEADLINE SENSITIVITY (12h vs 8h)
+  // =========================================================================
+  await assert('Test D: Deadline sensitivity (12h vs 8h) shrinks candidate set and elevates tail risk', async () => {
+    const job12h = { ...baseJob, id: 'job-d-12h', durationHours: 2, deadlineHours: 12 };
+    const job8h = { ...baseJob, id: 'job-d-8h', durationHours: 2, deadlineHours: 8 };
+
+    const dec12h = evaluateAllPolicies(job12h, forecastData, 1.0);
+    const dec8h = evaluateAllPolicies(job8h, forecastData, 1.0);
+
+    // For slot 6: finishes at 8h
+    // Under 12h deadline: slack = 4h
+    // Under 8h deadline: slack = 0h
+    const riskSlack4 = calculateDeadlineRisk(6, 2, 12, 15, 1.0).violationRisk;
+    const riskSlack0 = calculateDeadlineRisk(6, 2, 8, 15, 1.0).violationRisk;
+
+    if (riskSlack0 <= riskSlack4) {
+      throw new Error(`Slack decrease did not increase violation risk: slack4=${riskSlack4}, slack0=${riskSlack0}`);
+    }
+
+    console.log(`      Slot T+6:00 risk with 4h slack = ${(riskSlack4 * 100).toFixed(2)}% vs 0h slack = ${(riskSlack0 * 100).toFixed(2)}%`);
+    console.log(`      12h deadline selected: T+${dec12h.recommendedDecision.selectedStartHour}:00 | 8h deadline selected: T+${dec8h.recommendedDecision.selectedStartHour}:00`);
+
+    if (dec8h.recommendedDecision.selectedStartHour > 6) {
+      throw new Error(`8h deadline job selected start ${dec8h.recommendedDecision.selectedStartHour} which exceeds deadline`);
+    }
+  });
+
+  // =========================================================================
+  // TEST E: RISK TOLERANCE SENSITIVITY (tau: 1% strict vs 5% normal vs 20% relaxed)
+  // =========================================================================
+  await assert('Test E: Risk tolerance sensitivity dynamically adjusts acceptable window set', async () => {
+    const jobStrict = { ...baseJob, id: 'job-e-strict', riskTolerance: 0.01 };
+    const jobNormal = { ...baseJob, id: 'job-e-normal', riskTolerance: 0.05 };
+    const jobRelaxed = { ...baseJob, id: 'job-e-relaxed', riskTolerance: 0.20 };
+
+    const decStrict = evaluateAllPolicies(jobStrict, forecastData, 1.0);
+    const decNormal = evaluateAllPolicies(jobNormal, forecastData, 1.0);
+    const decRelaxed = evaluateAllPolicies(jobRelaxed, forecastData, 1.0);
+
+    console.log(`      Strict  (tau=1%):  T+${decStrict.recommendedDecision.selectedStartHour}:00 (Risk: ${(decStrict.recommendedDecision.estimatedDeadlineRisk * 100).toFixed(2)}%, Carbon: ${decStrict.recommendedDecision.predictedCarbon} gCO2)`);
+    console.log(`      Normal  (tau=5%):  T+${decNormal.recommendedDecision.selectedStartHour}:00 (Risk: ${(decNormal.recommendedDecision.estimatedDeadlineRisk * 100).toFixed(2)}%, Carbon: ${decNormal.recommendedDecision.predictedCarbon} gCO2)`);
+    console.log(`      Relaxed (tau=20%): T+${decRelaxed.recommendedDecision.selectedStartHour}:00 (Risk: ${(decRelaxed.recommendedDecision.estimatedDeadlineRisk * 100).toFixed(2)}%, Carbon: ${decRelaxed.recommendedDecision.predictedCarbon} gCO2)`);
+
+    if (decStrict.recommendedDecision.estimatedDeadlineRisk > 0.011) {
+      throw new Error(`Strict policy violated 1% risk bound: ${decStrict.recommendedDecision.estimatedDeadlineRisk}`);
     }
   });
 

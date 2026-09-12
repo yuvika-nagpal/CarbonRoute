@@ -6,6 +6,7 @@ import {
   TeamMember,
   RoadmapMilestone,
   FeasibilityResult,
+  TimeSlotCarbon,
   User,
   WorkloadJob,
   CarbonForecastData,
@@ -568,12 +569,17 @@ export const api = {
   },
 
   // Feasibility Simulation API
-  async simulateFeasibility(durationHours: number, deadlineHours: number, riskTolerance: number): Promise<ApiResponse<FeasibilityResult>> {
+  async simulateFeasibility(
+    durationHours: number,
+    deadlineHours: number,
+    riskTolerance: number,
+    region?: string
+  ): Promise<ApiResponse<FeasibilityResult>> {
     try {
       const res = await fetch(`${API_BASE}/scheduler/simulate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ durationHours, deadlineHours, riskTolerance }),
+        body: JSON.stringify({ durationHours, deadlineHours, riskTolerance, region }),
       });
       if (res.ok) {
         const json = await res.json();
@@ -581,39 +587,112 @@ export const api = {
       }
     } catch {}
 
+    // Dynamic Mathematical Fallback (Chebyshev erfc tail risk approximation)
+    const baseCurve = [310, 325, 340, 330, 290, 240, 190, 160, 150, 180, 260, 330];
+    const erfc = (x: number): number => {
+      if (x >= 8.0) return 0;
+      if (x <= -8.0) return 2.0;
+      const z = Math.abs(x);
+      const t = 1.0 / (1.0 + 0.5 * z);
+      const ans =
+        t *
+        Math.exp(
+          -z * z -
+            1.26551223 +
+            t *
+              (1.00002368 +
+                t *
+                  (0.37409196 +
+                    t *
+                      (0.09678418 +
+                        t *
+                          (-0.18628806 +
+                            t *
+                              (0.27886807 +
+                                t *
+                                  (-1.13520398 +
+                                    t *
+                                      (1.48851587 +
+                                        t * (-0.82215223 + t * 0.17087277))))))))
+        );
+      return x >= 0 ? ans : 2.0 - ans;
+    };
+
+    const calcRisk = (h: number, dur: number, ddl: number, mult: number) => {
+      const finish = h + dur;
+      const slack = ddl - finish;
+      if (slack < 0) return { stdDev: 40 * mult, violationRisk: 1.0 };
+      const sigmaTime = Math.max(0.25, (0.15 * dur + 0.12 * Math.sqrt(h)) * mult);
+      const z = slack / sigmaTime;
+      const risk = Math.max(0.0001, Math.min(1.0, 0.5 * erfc(z / Math.SQRT2)));
+      return { stdDev: Math.round(sigmaTime * 10), violationRisk: Math.round(risk * 1000) / 1000 };
+    };
+
+    const timeSlots: TimeSlotCarbon[] = [];
+    for (let h = 0; h < 12; h++) {
+      let sum = 0;
+      for (let w = h; w < h + durationHours; w++) {
+        sum += baseCurve[w % baseCurve.length];
+      }
+      const avgCarbon = Math.round(sum / durationHours);
+      const rLow = calcRisk(h, durationHours, deadlineHours, 0.7);
+      const rHigh = calcRisk(h, durationHours, deadlineHours, 2.4);
+      timeSlots.push({
+        hour: h,
+        predictedCarbon: avgCarbon,
+        uncertaintyLow: rLow,
+        uncertaintyHigh: rHigh,
+      });
+    }
+
+    const maxStart = deadlineHours - durationHours;
+    const feasibleSlots = timeSlots.filter((s) => s.hour <= maxStart);
+    const candA = feasibleSlots.filter((s) => s.uncertaintyLow.violationRisk <= riskTolerance);
+    const slotA = candA.length > 0
+      ? candA.reduce((min, cur) => (cur.predictedCarbon < min.predictedCarbon ? cur : min), candA[0])
+      : feasibleSlots[0];
+
+    const candB = feasibleSlots.filter((s) => s.uncertaintyHigh.violationRisk <= riskTolerance);
+    const slotB = candB.length > 0
+      ? candB.reduce((min, cur) => (cur.predictedCarbon < min.predictedCarbon ? cur : min), candB[0])
+      : feasibleSlots[0];
+
     return {
       success: true,
       data: {
-        input: { durationHours, deadlineHours, riskTolerance },
-        timeSlots: [
-          { hour: 0, predictedCarbon: 320, uncertaintyLow: { stdDev: 12, violationRisk: 0.01 }, uncertaintyHigh: { stdDev: 45, violationRisk: 0.08 } },
-          { hour: 4, predictedCarbon: 180, uncertaintyLow: { stdDev: 15, violationRisk: 0.02 }, uncertaintyHigh: { stdDev: 60, violationRisk: 0.18 } },
-        ],
+        input: { durationHours, deadlineHours, riskTolerance, region: region || 'US-CAL-CISO' },
+        timeSlots,
         scenarios: {
           scenarioA: {
             name: 'Low Forecast Uncertainty (High Confidence)',
-            predictedCarbonCurve: 'Clean solar trough between hours 4–8',
-            uncertaintyLevel: 'Low (sigma = 15 gCO2/kWh)',
-            selectedStartHour: 4,
-            selectedWindow: 'Hours 4–8 (Clean Period)',
-            predictedCarbonAtStart: 180,
-            estimatedViolationRisk: 0.02,
-            riskToleranceSatisfied: true,
-            decisionRationale: 'Delaying execution is safe because estimated deadline violation risk (2%) is well below the 5% tolerance.',
+            predictedCarbonCurve: 'Solar duck curve with midday low',
+            uncertaintyLevel: `Low (sigma ~ ${slotA.uncertaintyLow.stdDev})`,
+            selectedStartHour: slotA.hour,
+            selectedWindow: `T+${slotA.hour}:00 to T+${slotA.hour + durationHours}:00`,
+            predictedCarbonAtStart: slotA.predictedCarbon,
+            estimatedViolationRisk: slotA.uncertaintyLow.violationRisk,
+            riskToleranceSatisfied: slotA.uncertaintyLow.violationRisk <= riskTolerance,
+            decisionRationale: `Delaying to T+${slotA.hour}:00 achieves ${slotA.predictedCarbon} gCO2/kWh with ${(slotA.uncertaintyLow.violationRisk * 100).toFixed(1)}% risk, well below ${(riskTolerance * 100).toFixed(0)}% tolerance.`,
           },
           scenarioB: {
             name: 'High Forecast Uncertainty (Low Confidence)',
-            predictedCarbonCurve: 'Clean solar trough between hours 4–8',
-            uncertaintyLevel: 'High (sigma = 60 gCO2/kWh)',
-            selectedStartHour: 0,
-            selectedWindow: 'Immediate Start (Hour 0)',
-            predictedCarbonAtStart: 320,
-            estimatedViolationRisk: 0.01,
-            riskToleranceSatisfied: true,
-            decisionRationale: 'Delaying is too risky because high uncertainty elevates deadline violation risk to 18% (exceeding 5% tolerance).',
+            predictedCarbonCurve: 'Solar duck curve with midday low',
+            uncertaintyLevel: `High (sigma ~ ${slotB.uncertaintyHigh.stdDev})`,
+            selectedStartHour: slotB.hour,
+            selectedWindow: `T+${slotB.hour}:00 to T+${slotB.hour + durationHours}:00`,
+            predictedCarbonAtStart: slotB.predictedCarbon,
+            estimatedViolationRisk: slotB.uncertaintyHigh.violationRisk,
+            riskToleranceSatisfied: slotB.uncertaintyHigh.violationRisk <= riskTolerance,
+            decisionRationale:
+              slotB.hour < slotA.hour
+                ? `High uncertainty increases late window risk to ${(slotA.uncertaintyHigh.violationRisk * 100).toFixed(1)}% (exceeding ${(riskTolerance * 100).toFixed(0)}%). CarbonRoute shifts execution earlier to T+${slotB.hour}:00 to guarantee completion within risk limits.`
+                : `CarbonRoute selects window T+${slotB.hour}:00 satisfying the risk bound.`,
           },
         },
-        feasibilityConclusion: 'Uncertainty changes scheduling decisions even when point forecasts are identical.',
+        feasibilityConclusion:
+          slotA.hour !== slotB.hour
+            ? `Mathematical Proof: Identical carbon forecast produces different scheduling decisions (T+${slotA.hour} vs T+${slotB.hour}) due to horizon forecast uncertainty.`
+            : `Both scenarios satisfy the ${(riskTolerance * 100).toFixed(0)}% risk constraint at T+${slotA.hour}.`,
       },
     };
   },
@@ -691,6 +770,18 @@ export const api = {
       return { success: false, message: json?.message || `Results query failed (${res.status})` };
     } catch (err: any) {
       return { success: false, message: err.message || 'Network error fetching job results.' };
+    }
+  },
+
+  async getJobManifest(jobId: string, hour?: number): Promise<ApiResponse<any>> {
+    try {
+      const q = hour !== undefined ? `?hour=${encodeURIComponent(hour)}` : '';
+      const res = await fetch(`${API_BASE}/jobs/${encodeURIComponent(jobId)}/manifest${q}`);
+      const json = await res.json().catch(() => null);
+      if (res.ok && json && json.success) return json;
+      return { success: false, message: json?.message || `Manifest query failed (${res.status})` };
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Network error fetching job manifest.' };
     }
   },
 

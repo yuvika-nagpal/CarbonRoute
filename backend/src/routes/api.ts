@@ -23,6 +23,7 @@ import {
   scheduleJob,
   getJobStatus,
   getJobResults,
+  getJobManifest,
   dispatchJobToExecution,
   getCarbonForecast,
   getAvailableRegions,
@@ -98,6 +99,7 @@ router.post('/jobs', submitJob);
 router.post('/schedule', scheduleJob);
 router.get('/jobs/:id/status', getJobStatus);
 router.get('/jobs/:id/results', getJobResults);
+router.get('/jobs/:id/manifest', getJobManifest);
 router.post('/jobs/:id/dispatch', dispatchJobToExecution);
 
 router.get('/carbon/forecast', getCarbonForecast);

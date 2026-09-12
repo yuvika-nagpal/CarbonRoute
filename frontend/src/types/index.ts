@@ -107,6 +107,7 @@ export interface FeasibilityResult {
     durationHours: number;
     deadlineHours: number;
     riskTolerance: number;
+    region?: string;
   };
   timeSlots: TimeSlotCarbon[];
   scenarios: {
@@ -201,7 +202,8 @@ export interface K8sJobExecutionRecord {
   clusterMode: 'minikube' | 'offline_fallback';
   clusterNotice: string;
   predictedCarbon: number;
-  realizedCarbon?: number | string;
+  realizedCarbon?: number;
+  carbonError?: number;
   durationSeconds: number;
 }
 

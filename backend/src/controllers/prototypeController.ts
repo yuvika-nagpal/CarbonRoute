@@ -150,16 +150,22 @@ export const dispatchJobToExecution = async (req: Request, res: Response) => {
   try {
     const jobId = String(req.params.id);
     const job = registeredJobs.get(jobId);
-    const { predictedCarbon = 200, simulatedDurationSec = 6 } = req.body;
+    const {
+      predictedCarbon = 200,
+      simulatedDurationSec = 6,
+      scheduledHour = 0,
+    } = req.body;
 
-    const containerImage = job?.isContainerImage ? job.commandOrImage : 'carbonroute/test-workload:latest';
+    const containerImage = job?.isContainerImage
+      ? job.commandOrImage
+      : 'ghcr.io/carbonroute/workload-synthetic:latest';
     const command = job?.commandOrImage || 'python workload.py';
     const cpu = job?.cpu || 1;
     const memoryMb = job?.memoryMb || 512;
 
     const executionRecord = await K8sConnector.dispatchJob(
-      jobId,
-      containerImage,
+      job || jobId,
+      { predictedCarbon: Number(predictedCarbon), selectedStartHour: Number(scheduledHour) },
       command,
       cpu,
       memoryMb,
@@ -215,14 +221,17 @@ export const getJobResults = (req: Request, res: Response) => {
     data: {
       jobId: execution.jobId,
       k8sJobName: execution.k8sJobName,
+      podId: execution.podId,
       podName: execution.podName,
       status: execution.status,
       scheduledStartTime: execution.scheduledStartTime,
       actualStartTime: execution.actualStartTime || 'Pending',
       completionTime: execution.completionTime || 'Pending',
+      durationSeconds: execution.durationSeconds,
       exitCode: execution.exitCode ?? 'N/A',
       predictedCarbon: execution.predictedCarbon,
       realizedCarbon: execution.realizedCarbon,
+      carbonError: execution.carbonError,
       clusterMode: execution.clusterMode,
       clusterNotice: execution.clusterNotice,
       logs: execution.logs,
@@ -230,10 +239,23 @@ export const getJobResults = (req: Request, res: Response) => {
   });
 };
 
+export const getJobManifest = (req: Request, res: Response) => {
+  try {
+    const jobId = String(req.params.id);
+    const job = registeredJobs.get(jobId) || { id: jobId, cpu: 1, memoryMb: 512, region: 'US-CAL-CISO' };
+    const scheduledHour = Number(req.query.hour) || 0;
+    const manifest = K8sConnector.generateJobManifest(job, scheduledHour);
+    return res.json({ success: true, data: manifest });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 export const getCarbonForecast = async (req: Request, res: Response) => {
   try {
     const region = String(req.query.region || 'US-CAL-CISO');
-    const data = await CarbonService.getForecast(region);
+    const horizon = Number(req.query.horizon) || 24;
+    const data = await CarbonService.getForecast(region, horizon);
     return res.json({ success: true, data });
   } catch (error: any) {
     return res.status(500).json({ success: false, message: error.message });

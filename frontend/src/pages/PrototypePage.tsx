@@ -21,6 +21,10 @@ import {
   ChevronRight,
   RotateCw,
   ExternalLink,
+  FileCode,
+  X,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { api } from '../services/api';
 import {
@@ -55,6 +59,12 @@ export const PrototypePage: React.FC = () => {
   const [executionRecord, setExecutionRecord] = useState<K8sJobExecutionRecord | null>(null);
   const [dispatching, setDispatching] = useState<boolean>(false);
   const [clusterHealth, setClusterHealth] = useState<{ isAvailable: boolean; message: string } | null>(null);
+
+  // 4. Kubernetes Manifest Inspector State
+  const [showManifestModal, setShowManifestModal] = useState<boolean>(false);
+  const [manifestData, setManifestData] = useState<any>(null);
+  const [manifestLoading, setManifestLoading] = useState<boolean>(false);
+  const [manifestCopied, setManifestCopied] = useState<boolean>(false);
 
   // Auto-scroll logs
   const terminalLogsRef = useRef<HTMLDivElement>(null);
@@ -144,6 +154,106 @@ export const PrototypePage: React.FC = () => {
       console.error('Failed to dispatch job:', err);
     } finally {
       setDispatching(false);
+    }
+  };
+
+  // Convert JSON manifest object to formatted YAML string
+  const toYamlString = (obj: any, indent = 0): string => {
+    const pad = '  '.repeat(indent);
+    if (typeof obj !== 'object' || obj === null) {
+      return String(obj);
+    }
+    if (Array.isArray(obj)) {
+      return obj
+        .map((item) => {
+          if (typeof item === 'object' && item !== null) {
+            const inner = toYamlString(item, indent + 1).trimStart();
+            return `${pad}- ${inner}`;
+          }
+          return `${pad}- ${item}`;
+        })
+        .join('\n');
+    }
+    return Object.entries(obj)
+      .map(([key, val]) => {
+        if (typeof val === 'object' && val !== null) {
+          return `${pad}${key}:\n${toYamlString(val, indent + 1)}`;
+        }
+        return `${pad}${key}: ${val}`;
+      })
+      .join('\n');
+  };
+
+  // Open Kubernetes Manifest modal
+  const handleOpenManifest = async () => {
+    setShowManifestModal(true);
+    setManifestLoading(true);
+    setManifestCopied(false);
+    try {
+      const hour = decision?.recommendedDecision.selectedStartHour ?? 0;
+      if (activeJobId) {
+        const res = await api.getJobManifest(activeJobId, hour);
+        if (res.success && res.data) {
+          setManifestData(res.data);
+          return;
+        }
+      }
+
+      // In-client manifest constructor
+      const cleanId = (jobName || 'batch-job').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 16);
+      setManifestData({
+        apiVersion: 'batch/v1',
+        kind: 'Job',
+        metadata: {
+          name: `carbonroute-${cleanId}`,
+          namespace: 'carbonroute-jobs',
+          labels: {
+            app: 'carbonroute-workload',
+            'carbonroute.io/job-id': activeJobId || 'job-preview',
+            'carbonroute.io/scheduled-hour': `T+${hour}`,
+            'carbonroute.io/managed-by': 'carbonroute-scheduler',
+          },
+        },
+        spec: {
+          backoffLimit: 2,
+          ttlSecondsAfterFinished: 3600,
+          template: {
+            metadata: {
+              labels: {
+                app: 'carbonroute-workload',
+                'carbonroute.io/job-id': activeJobId || 'job-preview',
+              },
+            },
+            spec: {
+              restartPolicy: 'Never',
+              containers: [
+                {
+                  name: 'workload-runner',
+                  image: commandOrImage.startsWith('python') || commandOrImage.startsWith('tar')
+                    ? 'ghcr.io/carbonroute/workload-synthetic:latest'
+                    : commandOrImage,
+                  command: commandOrImage.startsWith('python')
+                    ? ['python', '/app/workload.py', '--epochs', '5']
+                    : ['sh', '-c', commandOrImage],
+                  resources: {
+                    requests: { cpu: `${cpu}`, memory: `${memoryMb}Mi` },
+                    limits: { cpu: `${cpu}`, memory: `${memoryMb}Mi` },
+                  },
+                  env: [
+                    { name: 'CARBONROUTE_JOB_ID', value: activeJobId || 'job-preview' },
+                    { name: 'CARBONROUTE_SCHEDULED_HOUR', value: String(hour) },
+                    { name: 'CARBONROUTE_REGION', value: region },
+                  ],
+                },
+              ],
+            },
+          },
+        },
+      });
+    } catch (err) {
+      console.error('Failed to load manifest:', err);
+    } finally {
+      setManifestLoading(false);
     }
   };
 
@@ -568,20 +678,31 @@ export const PrototypePage: React.FC = () => {
                 Ready to dispatch workload to Kubernetes Job connector.
               </div>
 
-              <button
-                type="button"
-                onClick={handleDispatchJob}
-                disabled={dispatching || executionRecord?.status === 'running'}
-                className="px-6 py-3 rounded-xl bg-emerald-500 text-slate-950 font-bold hover:bg-emerald-400 transition-all font-mono flex items-center space-x-2 shadow-lg shadow-emerald-950/50 disabled:opacity-50"
-              >
-                <Server className={`w-4 h-4 ${dispatching ? 'animate-spin' : ''}`} />
-                <span>
-                  {executionRecord?.status === 'running'
-                    ? 'Workload Executing...'
-                    : 'Dispatch to Kubernetes & Execute'}
-                </span>
-                <ArrowRight className="w-4 h-4 ml-1" />
-              </button>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleOpenManifest}
+                  className="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 text-slate-200 font-bold hover:text-emerald-300 hover:border-emerald-500/50 transition-all font-mono flex items-center space-x-2"
+                >
+                  <FileCode className="w-4 h-4 text-emerald-400" />
+                  <span>Inspect K8s Manifest</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleDispatchJob}
+                  disabled={dispatching || executionRecord?.status === 'running'}
+                  className="px-6 py-3 rounded-xl bg-emerald-500 text-slate-950 font-bold hover:bg-emerald-400 transition-all font-mono flex items-center space-x-2 shadow-lg shadow-emerald-950/50 disabled:opacity-50"
+                >
+                  <Server className={`w-4 h-4 ${dispatching ? 'animate-spin' : ''}`} />
+                  <span>
+                    {executionRecord?.status === 'running'
+                      ? 'Workload Executing...'
+                      : 'Dispatch to Kubernetes & Execute'}
+                  </span>
+                  <ArrowRight className="w-4 h-4 ml-1" />
+                </button>
+              </div>
             </div>
           </div>
 
@@ -787,7 +908,7 @@ export const PrototypePage: React.FC = () => {
             </h3>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs font-mono">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 text-xs font-mono">
             <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
               <span className="text-slate-400 text-[11px] block">Predicted Carbon</span>
               <div className="text-xl font-bold text-white">
@@ -803,6 +924,29 @@ export const PrototypePage: React.FC = () => {
               </div>
               <span className="text-[10px] text-emerald-400">Measured actual outcome</span>
             </div>
+
+            {(() => {
+              const realized =
+                typeof executionRecord.realizedCarbon === 'number'
+                  ? executionRecord.realizedCarbon
+                  : Number(executionRecord.realizedCarbon) || executionRecord.predictedCarbon;
+              const error =
+                executionRecord.carbonError ?? realized - executionRecord.predictedCarbon;
+              return (
+                <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+                  <span className="text-slate-400 text-[11px] block">Carbon Error</span>
+                  <div
+                    className={`text-xl font-bold ${
+                      error >= 0 ? 'text-amber-400' : 'text-emerald-400'
+                    }`}
+                  >
+                    {error > 0 ? '+' : ''}
+                    {error} gCO2
+                  </div>
+                  <span className="text-[10px] text-slate-500">Realized &minus; Predicted</span>
+                </div>
+              );
+            })()}
 
             <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
               <span className="text-slate-400 text-[11px] block">Execution Duration</span>
@@ -840,6 +984,86 @@ export const PrototypePage: React.FC = () => {
 
         <FeasibilityDemoVisualizer />
       </section>
+
+      {/* 8. Kubernetes Manifest Inspector Modal */}
+      {showManifestModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="glass-card w-full max-w-3xl rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <FileCode className="w-5 h-5 text-emerald-400" />
+                <h3 className="text-base font-bold text-white font-mono">
+                  Kubernetes batch/v1 Job Manifest
+                </h3>
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-950 text-emerald-400 border border-emerald-800">
+                  Ready to Apply
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowManifestModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 flex-1 overflow-y-auto font-mono text-xs text-slate-300 space-y-3">
+              <div className="flex items-center justify-between text-[11px] text-slate-400">
+                <span>
+                  Specification: <code>apiVersion: batch/v1</code> &bull; <code>kind: Job</code>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const yamlStr = toYamlString(manifestData);
+                    navigator.clipboard.writeText(yamlStr);
+                    setManifestCopied(true);
+                    setTimeout(() => setManifestCopied(false), 2000);
+                  }}
+                  className="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300 hover:text-emerald-300 hover:border-emerald-500/40 flex items-center space-x-1.5"
+                >
+                  {manifestCopied ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      <span className="text-emerald-400">Copied YAML</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Copy YAML</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {manifestLoading ? (
+                <div className="flex items-center justify-center h-48 space-x-2 text-slate-400">
+                  <RefreshCw className="w-4 h-4 animate-spin text-emerald-400" />
+                  <span>Generating Kubernetes Manifest...</span>
+                </div>
+              ) : (
+                <pre className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-emerald-300 text-xs overflow-x-auto leading-relaxed select-text font-mono">
+                  {toYamlString(manifestData)}
+                </pre>
+              )}
+            </div>
+
+            <div className="p-4 border-t border-slate-800 bg-slate-950/60 flex items-center justify-between text-xs font-mono text-slate-400">
+              <span>
+                Execute with: <code>kubectl apply -f manifest.yaml</code>
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowManifestModal(false)}
+                className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
