@@ -284,6 +284,85 @@ async function runVerticalSliceTests() {
     }
   });
 
+  // =========================================================================
+  // TEST F: CANDIDATE WINDOWS EXPLORER EVALUATION & CLASSIFICATION INTEGRITY
+  // =========================================================================
+  await assert('Test F: Candidate Windows Explorer exhaustively enumerates, evaluates, and classifies all candidate windows', async () => {
+    const dec = evaluateAllPolicies(baseJob, forecastData, 1.0);
+    const windows = dec.candidateWindows;
+
+    if (!Array.isArray(windows) || windows.length === 0) {
+      throw new Error(`Expected non-empty candidateWindows array, got ${windows?.length}`);
+    }
+
+    // Check all fields on every candidate window
+    let recommendedCount = 0;
+    let feasibleCount = 0;
+    let highRiskCount = 0;
+    let deadlineBreachCount = 0;
+
+    for (const w of windows) {
+      if (typeof w.slotIndex !== 'number') throw new Error(`Missing slotIndex in window ${w.windowLabel}`);
+      if (typeof w.startHour !== 'number') throw new Error(`Missing startHour in window ${w.windowLabel}`);
+      if (typeof w.endHour !== 'number') throw new Error(`Missing endHour in window ${w.windowLabel}`);
+      if (typeof w.predictedCarbonIntensity !== 'number' || w.predictedCarbonIntensity <= 0) {
+        throw new Error(`Invalid predictedCarbonIntensity in window ${w.windowLabel}: ${w.predictedCarbonIntensity}`);
+      }
+      if (typeof w.predictedCarbonImpactGrams !== 'number' || w.predictedCarbonImpactGrams <= 0) {
+        throw new Error(`Invalid predictedCarbonImpactGrams in window ${w.windowLabel}: ${w.predictedCarbonImpactGrams}`);
+      }
+      if (typeof w.stdDev !== 'number' || w.stdDev <= 0) {
+        throw new Error(`Invalid stdDev in window ${w.windowLabel}: ${w.stdDev}`);
+      }
+      if (typeof w.uncertaintyRange !== 'string' || !w.uncertaintyRange.includes('±')) {
+        throw new Error(`Invalid uncertaintyRange in window ${w.windowLabel}: ${w.uncertaintyRange}`);
+      }
+      if (typeof w.deadlineRisk !== 'number' || w.deadlineRisk < 0 || w.deadlineRisk > 1) {
+        throw new Error(`Invalid deadlineRisk in window ${w.windowLabel}: ${w.deadlineRisk}`);
+      }
+      if (typeof w.deadlineRiskPct !== 'string' || !w.deadlineRiskPct.includes('%')) {
+        throw new Error(`Invalid deadlineRiskPct in window ${w.windowLabel}: ${w.deadlineRiskPct}`);
+      }
+      if (typeof w.slackHours !== 'number') throw new Error(`Missing slackHours in window ${w.windowLabel}`);
+      if (typeof w.isFeasible !== 'boolean') throw new Error(`Missing isFeasible in window ${w.windowLabel}`);
+      if (typeof w.reason !== 'string' || w.reason.length < 10) {
+        throw new Error(`Missing or short reason in window ${w.windowLabel}: ${w.reason}`);
+      }
+
+      if (w.classification === 'RECOMMENDED') {
+        recommendedCount++;
+        feasibleCount++;
+      } else if (w.classification === 'FEASIBLE') {
+        feasibleCount++;
+      } else if (w.classification === 'REJECTED_HIGH_RISK') {
+        highRiskCount++;
+      } else if (w.classification === 'REJECTED_DEADLINE_BREACH') {
+        deadlineBreachCount++;
+      } else {
+        throw new Error(`Unknown classification: ${w.classification}`);
+      }
+
+      // Semantic integrity assertions
+      if (!w.meetsDeadline && w.classification !== 'REJECTED_DEADLINE_BREACH') {
+        throw new Error(`Window ${w.windowLabel} misses deadline but classification is ${w.classification}`);
+      }
+      if (w.meetsDeadline && w.deadlineRisk > baseJob.riskTolerance && w.classification !== 'REJECTED_HIGH_RISK') {
+        throw new Error(`Window ${w.windowLabel} exceeds risk tolerance but classification is ${w.classification}`);
+      }
+      if (w.isFeasible && !['RECOMMENDED', 'FEASIBLE'].includes(w.classification)) {
+        throw new Error(`Window ${w.windowLabel} is feasible but classification is ${w.classification}`);
+      }
+    }
+
+    if (recommendedCount !== 1) {
+      throw new Error(`Expected exactly 1 RECOMMENDED window, got ${recommendedCount}`);
+    }
+
+    console.log(`      Total Candidate Windows: ${windows.length}`);
+    console.log(`      Feasible (incl. Recommended): ${feasibleCount} | High Risk: ${highRiskCount} | Deadline Breaches: ${deadlineBreachCount}`);
+    console.log(`      Sample Window: ${windows[0].windowLabel} -> Intensity: ${windows[0].predictedCarbonIntensity} g/kWh, Impact: ${windows[0].predictedCarbonImpactGrams} gCO2, Risk: ${windows[0].deadlineRiskPct}, Status: ${windows[0].classification}`);
+  });
+
   console.log('\n========================================================');
   console.log(`🎯 Prototype Vertical Slice Test Results: ${passed} PASSED, ${failed} FAILED`);
   console.log('========================================================\n');

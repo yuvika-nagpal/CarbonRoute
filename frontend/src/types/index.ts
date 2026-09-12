@@ -172,11 +172,36 @@ export interface PolicyEvaluationResult {
   rationale: string;
 }
 
+export interface CandidateWindowEvaluation {
+  slotIndex: number;
+  startHour: number;
+  endHour: number;
+  windowLabel: string;
+  predictedCarbonIntensity: number; // gCO2eq/kWh
+  predictedCarbonImpactGrams: number; // estimated total grams CO2
+  stdDev: number; // forecast uncertainty sigma
+  uncertaintyRange: string;
+  deadlineRisk: number; // decimal probability
+  deadlineRiskPct: string; // e.g. "4.0%"
+  slackHours: number;
+  waitingTimeHours: number;
+  isFeasible: boolean;
+  meetsDeadline: boolean;
+  classification:
+    | 'RECOMMENDED'
+    | 'FEASIBLE'
+    | 'REJECTED_HIGH_RISK'
+    | 'REJECTED_DEADLINE_BREACH';
+  classificationLabel: string; // "RECOMMENDED" | "FEASIBLE BUT NOT OPTIMAL" | "REJECTED — HIGH DEADLINE RISK" | "REJECTED — MISSES DEADLINE"
+  reason: string;
+}
+
 export interface SchedulingDecisionResponse {
   job: WorkloadJob;
   carbonSource: string;
   dataMode: 'live' | 'demo';
   region: string;
+  candidateWindows?: CandidateWindowEvaluation[];
   evaluatedPolicies: PolicyEvaluationResult[];
   recommendedDecision: PolicyEvaluationResult;
   comparisonSummary: {

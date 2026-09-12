@@ -32,11 +32,36 @@ export interface PolicyEvaluationResult {
   rationale: string;
 }
 
+export interface CandidateWindowEvaluation {
+  slotIndex: number;
+  startHour: number;
+  endHour: number;
+  windowLabel: string;
+  predictedCarbonIntensity: number; // gCO2eq/kWh
+  predictedCarbonImpactGrams: number; // estimated total grams CO2
+  stdDev: number; // forecast uncertainty sigma
+  uncertaintyRange: string;
+  deadlineRisk: number; // decimal probability
+  deadlineRiskPct: string; // e.g. "4.0%"
+  slackHours: number;
+  waitingTimeHours: number;
+  isFeasible: boolean;
+  meetsDeadline: boolean;
+  classification:
+    | 'RECOMMENDED'
+    | 'FEASIBLE'
+    | 'REJECTED_HIGH_RISK'
+    | 'REJECTED_DEADLINE_BREACH';
+  classificationLabel: string; // "RECOMMENDED" | "FEASIBLE BUT NOT OPTIMAL" | "REJECTED — HIGH DEADLINE RISK" | "REJECTED — MISSES DEADLINE"
+  reason: string;
+}
+
 export interface SchedulingDecisionResponse {
   job: WorkloadJob;
   carbonSource: string;
   dataMode: 'live' | 'demo';
   region: string;
+  candidateWindows: CandidateWindowEvaluation[];
   evaluatedPolicies: PolicyEvaluationResult[];
   recommendedDecision: PolicyEvaluationResult;
   comparisonSummary: {
@@ -235,93 +260,113 @@ export class SchedulerService {
     };
 
     // -------------------------------------------------------------
-    // POLICY 5: CarbonRoute Uncertainty-Aware (Constrained Optimization)
-    // Objective: min E[Carbon(t)] subject to P(violation) <= tau and t + dur <= ddl
+    // FULL CANDIDATE WINDOWS EVALUATION & CLASSIFICATION
+    // Evaluates every possible execution window within horizon up to deadline
     // -------------------------------------------------------------
     const startCr = performance.now();
-    const candidateWindows: Array<{
-      slot: number;
-      carbon: number;
-      risk: number;
-      slack: number;
-    }> = [];
+    const candidateWindows: CandidateWindowEvaluation[] = [];
+    const maxEvaluationHour = Math.min(horizon - 1, ddl + 1);
+    const powerKw = Math.max(0.1, Number((((job.cpu || 2) / 2) * 0.25).toFixed(3)));
+    const energyKwh = Number((dur * powerKw).toFixed(3));
 
-    for (let t = arrival; t <= ddl - dur; t++) {
+    for (let t = arrival; t <= maxEvaluationHour; t++) {
       const { avgCarbon, avgStd } = computeWindowMetrics(t);
-      const riskObj = UncertaintyService.calculateDeadlineRisk(
-        t,
-        dur,
-        ddl,
-        avgStd,
-        uncertaintyMultiplier
-      );
+      const startHour = t;
+      const endHour = t + dur;
+      const windowLabel = `T+${startHour}:00 → T+${endHour}:00`;
+      const meetsDeadline = endHour <= ddl;
+      const slackHours = ddl - endHour;
+      const waitingTimeHours = startHour - arrival;
+      const predictedCarbonImpactGrams = Math.round(avgCarbon * energyKwh);
+      const uncertaintyRange = `${avgCarbon} ± ${avgStd} gCO2/kWh`;
 
-      // Only retain candidates satisfying user deadline risk constraint
-      if (riskObj.violationRisk <= tau) {
-        candidateWindows.push({
-          slot: t,
-          carbon: avgCarbon,
-          risk: riskObj.violationRisk,
-          slack: riskObj.slackHours,
-        });
-      }
-    }
-
-    let crSlot: number;
-    let crCarbon: number;
-    let crRisk: number;
-    let crRationale: string;
-
-    if (candidateWindows.length > 0) {
-      // Sort primarily by carbon ascending (lowest first), tie-break by earlier slot
-      candidateWindows.sort((a, b) => {
-        if (a.carbon !== b.carbon) return a.carbon - b.carbon;
-        return a.slot - b.slot;
-      });
-
-      const selected = candidateWindows[0];
-      crSlot = selected.slot;
-      crCarbon = selected.carbon;
-      crRisk = selected.risk;
-
-      if (crSlot === bestDetSlot) {
-        crRationale = `Selected lowest carbon window (T+${crSlot}) because estimated deadline risk (${(
-          crRisk * 100
-        ).toFixed(1)}%) is comfortably within your ${(tau * 100).toFixed(0)}% tolerance.`;
-      } else {
-        crRationale = `Selected safer window (T+${crSlot}, ${crCarbon} gCO2) with ${(crRisk * 100).toFixed(
-          1
-        )}% risk. The global minimum slot (T+${bestDetSlot}, ${minDetCarbon} gCO2) was rejected because its high forecast uncertainty elevated deadline breach risk to ${(
-          detRisk * 100
-        ).toFixed(1)}%, exceeding your ${(tau * 100).toFixed(0)}% tolerance constraint.`;
-      }
-    } else {
-      // Fallback: If no candidate satisfies strict tau, choose the slot that minimizes risk
-      let minRisk = Infinity;
-      let safestSlot = arrival;
-      for (let t = arrival; t <= ddl - dur; t++) {
-        const { avgStd } = computeWindowMetrics(t);
-        const r = UncertaintyService.calculateDeadlineRisk(
+      let deadlineRisk = 1.0;
+      if (meetsDeadline) {
+        deadlineRisk = UncertaintyService.calculateDeadlineRisk(
           t,
           dur,
           ddl,
           avgStd,
           uncertaintyMultiplier
         ).violationRisk;
-        if (r < minRisk) {
-          minRisk = r;
-          safestSlot = t;
-        }
       }
-      crSlot = safestSlot;
-      const { avgCarbon } = computeWindowMetrics(crSlot);
-      crCarbon = avgCarbon;
-      crRisk = minRisk;
-      crRationale = `No execution window satisfied your strict ${(tau * 100).toFixed(
-        0
-      )}% risk tolerance given the tight deadline (${ddl}h). Falling back to minimum-risk slot (T+${crSlot}) with ${(
-        crRisk * 100
-      ).toFixed(1)}% risk to preserve feasibility.`;
+
+      let classification: CandidateWindowEvaluation['classification'];
+      let classificationLabel: string;
+      let isFeasible = false;
+      let reason = '';
+
+      if (!meetsDeadline) {
+        classification = 'REJECTED_DEADLINE_BREACH';
+        classificationLabel = 'REJECTED — MISSES DEADLINE';
+        isFeasible = false;
+        reason = `Infeasible: A ${dur}h workload starting at T+${startHour}:00 finishes at T+${endHour}:00, which breaches the T+${ddl}:00 deadline by ${Math.abs(slackHours)} hour(s).`;
+      } else if (deadlineRisk > tau) {
+        classification = 'REJECTED_HIGH_RISK';
+        classificationLabel = 'REJECTED — HIGH DEADLINE RISK';
+        isFeasible = false;
+        reason = `Rejected: Estimated deadline violation risk (${(deadlineRisk * 100).toFixed(1)}%) exceeds your ${(tau * 100).toFixed(0)}% risk tolerance threshold.`;
+      } else {
+        classification = 'FEASIBLE';
+        classificationLabel = 'FEASIBLE BUT NOT OPTIMAL';
+        isFeasible = true;
+        reason = `Feasible alternative: Meets deadline (slack: ${slackHours}h) with deadline risk (${(deadlineRisk * 100).toFixed(1)}%) strictly below ${(tau * 100).toFixed(0)}% tolerance.`;
+      }
+
+      candidateWindows.push({
+        slotIndex: t,
+        startHour,
+        endHour,
+        windowLabel,
+        predictedCarbonIntensity: avgCarbon,
+        predictedCarbonImpactGrams,
+        stdDev: avgStd,
+        uncertaintyRange,
+        deadlineRisk,
+        deadlineRiskPct: `${(deadlineRisk * 100).toFixed(1)}%`,
+        slackHours,
+        waitingTimeHours,
+        isFeasible,
+        meetsDeadline,
+        classification,
+        classificationLabel,
+        reason,
+      });
+    }
+
+    // -------------------------------------------------------------
+    // POLICY 5: CarbonRoute Uncertainty-Aware (Constrained Optimization)
+    // Select the lowest expected carbon window among feasible candidates
+    // -------------------------------------------------------------
+    const feasibleCandidates = candidateWindows.filter((w) => w.isFeasible);
+    let optimalCandidate: CandidateWindowEvaluation;
+
+    if (feasibleCandidates.length > 0) {
+      // Find candidate with lowest carbon intensity (tie-break earlier start)
+      optimalCandidate = feasibleCandidates.reduce((best, cur) => {
+        if (cur.predictedCarbonIntensity < best.predictedCarbonIntensity) return cur;
+        if (cur.predictedCarbonIntensity === best.predictedCarbonIntensity && cur.startHour < best.startHour) return cur;
+        return best;
+      }, feasibleCandidates[0]);
+
+      optimalCandidate.classification = 'RECOMMENDED';
+      optimalCandidate.classificationLabel = 'RECOMMENDED';
+
+      if (optimalCandidate.startHour === bestDetSlot) {
+        optimalCandidate.reason = `Optimal window recommended by CarbonRoute: achieves the global minimum carbon intensity (${optimalCandidate.predictedCarbonIntensity} gCO2/kWh, ${optimalCandidate.predictedCarbonImpactGrams}g total) with estimated deadline risk (${optimalCandidate.deadlineRiskPct}) safely within your ${(tau * 100).toFixed(0)}% tolerance.`;
+      } else {
+        optimalCandidate.reason = `Optimal risk-calibrated window recommended by CarbonRoute: achieves low carbon intensity (${optimalCandidate.predictedCarbonIntensity} gCO2/kWh, ${optimalCandidate.predictedCarbonImpactGrams}g total) with safe deadline risk (${optimalCandidate.deadlineRiskPct}). The unconstrained minimum window (T+${bestDetSlot}:00, ${minDetCarbon} gCO2) was rejected because its high forecast uncertainty elevated deadline breach risk to ${(detRisk * 100).toFixed(1)}%, exceeding your ${(tau * 100).toFixed(0)}% risk limit.`;
+      }
+    } else {
+      // Safety fallback if no candidate satisfies tau: pick the deadline-compliant window with lowest risk
+      const deadlineCompliant = candidateWindows.filter((w) => w.meetsDeadline);
+      optimalCandidate = (deadlineCompliant.length > 0 ? deadlineCompliant : candidateWindows).reduce((safest, cur) => {
+        return cur.deadlineRisk < safest.deadlineRisk ? cur : safest;
+      }, candidateWindows[0]);
+
+      optimalCandidate.classification = 'RECOMMENDED';
+      optimalCandidate.classificationLabel = 'RECOMMENDED';
+      optimalCandidate.reason = `Safety fallback: No window satisfied your strict ${(tau * 100).toFixed(0)}% risk tolerance given deadline T+${ddl}:00. Selected lowest-risk candidate (T+${optimalCandidate.startHour}:00, risk: ${optimalCandidate.deadlineRiskPct}) to preserve SLA viability.`;
     }
 
     const overheadCr = Number((performance.now() - startCr).toFixed(2));
@@ -330,15 +375,15 @@ export class SchedulerService {
       policyId: 'carbonroute_uncertainty',
       policyName: 'CarbonRoute Uncertainty-Aware',
       category: 'Uncertainty-Aware',
-      selectedStartHour: crSlot,
-      selectedEndHour: crSlot + dur,
-      selectedWindow: `T+${crSlot}:00 to T+${crSlot + dur}:00`,
-      predictedCarbon: crCarbon,
-      estimatedDeadlineRisk: crRisk,
-      waitingTimeHours: crSlot - arrival,
-      isFeasible: crSlot + dur <= ddl,
+      selectedStartHour: optimalCandidate.startHour,
+      selectedEndHour: optimalCandidate.endHour,
+      selectedWindow: optimalCandidate.windowLabel,
+      predictedCarbon: optimalCandidate.predictedCarbonIntensity,
+      estimatedDeadlineRisk: optimalCandidate.deadlineRisk,
+      waitingTimeHours: optimalCandidate.waitingTimeHours,
+      isFeasible: optimalCandidate.isFeasible,
       schedulerOverheadMs: overheadCr,
-      rationale: crRationale,
+      rationale: optimalCandidate.reason,
     };
 
     const evaluatedPolicies = [
@@ -351,7 +396,7 @@ export class SchedulerService {
 
     const carbonSavingsPct =
       immCarbon > 0
-        ? Number((((immCarbon - crCarbon) / immCarbon) * 100).toFixed(1))
+        ? Number((((immCarbon - optimalCandidate.predictedCarbonIntensity) / immCarbon) * 100).toFixed(1))
         : 0;
 
     return {
@@ -359,12 +404,13 @@ export class SchedulerService {
       carbonSource: source,
       dataMode,
       region,
+      candidateWindows,
       evaluatedPolicies,
       recommendedDecision: carbonRoutePolicy,
       comparisonSummary: {
         carbonSavingsVsImmediatePct: carbonSavingsPct,
-        delayPenaltyHours: crSlot - arrival,
-        riskDifferenceVsDeterministic: Number(((detRisk - crRisk) * 100).toFixed(1)),
+        delayPenaltyHours: optimalCandidate.waitingTimeHours,
+        riskDifferenceVsDeterministic: Number(((detRisk - optimalCandidate.deadlineRisk) * 100).toFixed(1)),
       },
     };
   }

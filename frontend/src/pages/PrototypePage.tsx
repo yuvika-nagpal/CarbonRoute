@@ -25,6 +25,9 @@ import {
   X,
   Copy,
   Check,
+  TrendingDown,
+  Filter,
+  CheckCircle,
 } from 'lucide-react';
 import { api } from '../services/api';
 import {
@@ -53,6 +56,7 @@ export const PrototypePage: React.FC = () => {
   const [decision, setDecision] = useState<SchedulingDecisionResponse | null>(null);
   const [loadingSchedule, setLoadingSchedule] = useState<boolean>(false);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
+  const [candidateFilter, setCandidateFilter] = useState<'all' | 'feasible' | 'rejected'>('all');
 
   // 3. Kubernetes Execution State
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
@@ -499,7 +503,7 @@ export const PrototypePage: React.FC = () => {
               className="px-6 py-3 rounded-xl bg-emerald-500 text-slate-950 font-bold hover:bg-emerald-400 transition-all font-mono flex items-center space-x-2 shadow-lg shadow-emerald-950/50 disabled:opacity-50"
             >
               <RefreshCw className={`w-4 h-4 ${loadingSchedule ? 'animate-spin' : ''}`} />
-              <span>Evaluate 5 Schedulers</span>
+              <span>Analyze Scheduling Options</span>
             </button>
           </div>
         </form>
@@ -705,6 +709,337 @@ export const PrototypePage: React.FC = () => {
               </div>
             </div>
           </div>
+
+          {/* SECTION D: ALL SCHEDULING OPTIONS (Candidate Windows Explorer) */}
+          {decision.candidateWindows && decision.candidateWindows.length > 0 && (
+            <div className="glass-card rounded-2xl p-6 sm:p-8 border border-slate-800 space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-800">
+                <div>
+                  <h3 className="text-base font-bold text-white font-mono flex items-center space-x-2">
+                    <Clock className="w-4 h-4 text-emerald-400" />
+                    <span>All Scheduling Options (Candidate Windows Explorer)</span>
+                  </h3>
+                  <p className="text-xs font-mono text-slate-400 mt-1">
+                    Exhaustive evaluation of all {decision.candidateWindows.length} possible execution windows within deadline (T+0 to T+{deadlineHours})
+                  </p>
+                </div>
+
+                {/* Filter Controls */}
+                <div className="flex items-center space-x-1.5 bg-slate-950/80 p-1 rounded-xl border border-slate-800 self-start sm:self-auto">
+                  <button
+                    type="button"
+                    onClick={() => setCandidateFilter('all')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-mono transition-all flex items-center space-x-1.5 ${
+                      candidateFilter === 'all'
+                        ? 'bg-slate-800 text-white font-bold shadow'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <span>All Windows</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-700/60 text-slate-300">
+                      {decision.candidateWindows.length}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCandidateFilter('feasible')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-mono transition-all flex items-center space-x-1.5 ${
+                      candidateFilter === 'feasible'
+                        ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-500/40 font-bold shadow'
+                        : 'text-slate-400 hover:text-emerald-300'
+                    }`}
+                  >
+                    <span>Feasible</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-900/60 text-emerald-300">
+                      {decision.candidateWindows.filter((w) => w.isFeasible).length}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCandidateFilter('rejected')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-mono transition-all flex items-center space-x-1.5 ${
+                      candidateFilter === 'rejected'
+                        ? 'bg-rose-950/60 text-rose-300 border border-rose-500/40 font-bold shadow'
+                        : 'text-slate-400 hover:text-rose-300'
+                    }`}
+                  >
+                    <span>Rejected</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-900/60 text-rose-300">
+                      {decision.candidateWindows.filter((w) => !w.isFeasible).length}
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Candidate Table */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs font-mono">
+                  <thead className="bg-slate-900 text-slate-400 text-[11px] border-b border-slate-800">
+                    <tr>
+                      <th className="p-3">Execution Window</th>
+                      <th className="p-3">Wait Delay</th>
+                      <th className="p-3">Carbon Intensity</th>
+                      <th className="p-3">Total Impact</th>
+                      <th className="p-3">Uncertainty Range</th>
+                      <th className="p-3">Deadline Risk</th>
+                      <th className="p-3">Slack Time</th>
+                      <th className="p-3">Status / Classification</th>
+                      <th className="p-3 min-w-[220px]">Scientific Rationale</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60">
+                    {decision.candidateWindows
+                      .filter((win) => {
+                        if (candidateFilter === 'feasible') return win.isFeasible;
+                        if (candidateFilter === 'rejected') return !win.isFeasible;
+                        return true;
+                      })
+                      .map((win) => {
+                        const isRec = win.classification === 'RECOMMENDED';
+                        const isRiskBreach = win.classification === 'REJECTED_HIGH_RISK';
+                        const isDeadlineBreach = win.classification === 'REJECTED_DEADLINE_BREACH';
+
+                        return (
+                          <tr
+                            key={win.slotIndex}
+                            className={`transition-colors ${
+                              isRec
+                                ? 'bg-emerald-950/30 font-semibold border-l-2 border-l-emerald-500'
+                                : 'hover:bg-slate-900/50'
+                            }`}
+                          >
+                            <td className="p-3 whitespace-nowrap">
+                              <div className="flex items-center space-x-2">
+                                <span className="text-white font-bold">{win.windowLabel}</span>
+                                {isRec && (
+                                  <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-bold border border-emerald-500/40">
+                                    OPTIMUM
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="p-3 whitespace-nowrap text-slate-300">
+                              +{win.waitingTimeHours}h
+                            </td>
+                            <td className="p-3 whitespace-nowrap">
+                              <span className="text-emerald-400 font-bold">
+                                {win.predictedCarbonIntensity.toFixed(1)}
+                              </span>{' '}
+                              <span className="text-slate-500 text-[10px]">gCO2/kWh</span>
+                            </td>
+                            <td className="p-3 whitespace-nowrap">
+                              <span className="text-white font-bold">
+                                {win.predictedCarbonImpactGrams.toFixed(1)}
+                              </span>{' '}
+                              <span className="text-slate-500 text-[10px]">gCO2</span>
+                            </td>
+                            <td className="p-3 whitespace-nowrap text-slate-300">
+                              <span className="text-slate-400">{win.uncertaintyRange}</span>{' '}
+                              <span className="text-[10px] text-slate-500">
+                                (σ={win.stdDev.toFixed(1)})
+                              </span>
+                            </td>
+                            <td className="p-3 whitespace-nowrap">
+                              <span
+                                className={`font-bold ${
+                                  win.deadlineRisk > riskTolerance
+                                    ? 'text-rose-400'
+                                    : win.deadlineRisk > 0
+                                    ? 'text-amber-400'
+                                    : 'text-emerald-400'
+                                }`}
+                              >
+                                {win.deadlineRiskPct}
+                              </span>
+                            </td>
+                            <td className="p-3 whitespace-nowrap text-slate-400">
+                              {win.slackHours >= 0 ? `${win.slackHours}h remaining` : `${win.slackHours}h overrun`}
+                            </td>
+                            <td className="p-3 whitespace-nowrap">
+                              {isRec ? (
+                                <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-[11px] font-bold border border-emerald-500/50">
+                                  <CheckCircle className="w-3 h-3 text-emerald-400" />
+                                  <span>RECOMMENDED</span>
+                                </span>
+                              ) : win.isFeasible ? (
+                                <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full bg-sky-500/10 text-sky-300 text-[11px] border border-sky-500/30">
+                                  <span>FEASIBLE</span>
+                                </span>
+                              ) : isRiskBreach ? (
+                                <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-300 text-[11px] border border-amber-500/40">
+                                  <AlertCircle className="w-3 h-3 text-amber-400" />
+                                  <span>HIGH RISK</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full bg-rose-500/15 text-rose-300 text-[11px] border border-rose-500/40">
+                                  <X className="w-3 h-3 text-rose-400" />
+                                  <span>BREACHES DEADLINE</span>
+                                </span>
+                              )}
+                            </td>
+                            <td className="p-3 text-slate-400 text-[11px] leading-relaxed">
+                              {win.reason}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* SECTION E: SCHEDULING TRADE-OFF VISUALIZER */}
+          {(() => {
+            const immPol = decision.evaluatedPolicies.find((p) => p.policyId === 'immediate');
+            const detPol = decision.evaluatedPolicies.find((p) => p.policyId === 'deterministic_carbon');
+            const recPol = decision.recommendedDecision;
+            const immCarbon = immPol?.predictedCarbon ?? 0;
+            const detCarbon = detPol?.predictedCarbon ?? 0;
+            const recCarbon = recPol?.predictedCarbon ?? 0;
+
+            return (
+              <div className="glass-card rounded-2xl p-6 sm:p-8 border border-slate-800 space-y-6">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                  <div>
+                    <h3 className="text-base font-bold text-white font-mono flex items-center space-x-2">
+                      <TrendingDown className="w-4 h-4 text-emerald-400" />
+                      <span>Scheduling Trade-Off Visualizer (Carbon vs. Risk)</span>
+                    </h3>
+                    <p className="text-xs font-mono text-slate-400 mt-1">
+                      Direct trade-off breakdown between immediate dispatch, greedy delay, and CarbonRoute's risk-bounded optimum
+                    </p>
+                  </div>
+                  <span className="text-xs font-mono px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-slate-300">
+                    Risk Limit: {(riskTolerance * 100).toFixed(0)}%
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-5 font-mono">
+                  {/* Option 1: Immediate Execution */}
+                  <div className="p-5 rounded-xl bg-slate-950/70 border border-slate-800 space-y-4 flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                          Option 1: Immediate
+                        </span>
+                        <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400">
+                          T+0:00
+                        </span>
+                      </div>
+                      <div className="mt-3 space-y-2">
+                        <div className="text-2xl font-extrabold text-white">
+                          {immCarbon} <span className="text-xs font-normal text-slate-400">gCO2</span>
+                        </div>
+                        <div className="flex items-center space-x-2 text-xs">
+                          <span className="text-slate-400">Wait Delay:</span>
+                          <span className="text-white font-bold">0 Hours</span>
+                        </div>
+                        <div className="flex items-center space-x-2 text-xs">
+                          <span className="text-slate-400">Deadline Risk:</span>
+                          <span className="text-emerald-400 font-bold">0.0% (Zero Risk)</span>
+                        </div>
+                        <div className="flex items-center space-x-2 text-xs">
+                          <span className="text-slate-400">Slack Remaining:</span>
+                          <span className="text-slate-300 font-bold">{deadlineHours - durationHours}h</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="pt-3 border-t border-slate-800/80 text-[11px] text-slate-400 leading-relaxed">
+                      Safe on-time completion, but pays maximum carbon penalty because work is executed immediately regardless of grid carbon intensity.
+                    </div>
+                  </div>
+
+                  {/* Option 2: Deterministic / Greedy Carbon */}
+                  <div className="p-5 rounded-xl bg-slate-950/70 border border-slate-800 space-y-4 flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">
+                          Option 2: Greedy Delay
+                        </span>
+                        <span className="text-[10px] px-2 py-0.5 rounded bg-amber-950/60 border border-amber-500/30 text-amber-300">
+                          T+{detPol?.waitingTimeHours || 0}:00
+                        </span>
+                      </div>
+                      <div className="mt-3 space-y-2">
+                        <div className="text-2xl font-extrabold text-amber-300">
+                          {detCarbon} <span className="text-xs font-normal text-slate-400">gCO2</span>
+                        </div>
+                        <div className="flex items-center space-x-2 text-xs">
+                          <span className="text-slate-400">Wait Delay:</span>
+                          <span className="text-white font-bold">+{detPol?.waitingTimeHours || 0} Hours</span>
+                        </div>
+                        <div className="flex items-center space-x-2 text-xs">
+                          <span className="text-slate-400">Deadline Risk:</span>
+                          <span
+                            className={`font-bold ${
+                              (detPol?.estimatedDeadlineRisk || 0) > riskTolerance
+                                ? 'text-rose-400'
+                                : 'text-amber-300'
+                            }`}
+                          >
+                            {(((detPol?.estimatedDeadlineRisk || 0) * 100)).toFixed(1)}%
+                          </span>
+                        </div>
+                        <div className="flex items-center space-x-2 text-xs">
+                          <span className="text-slate-400">Slack Remaining:</span>
+                          <span className="text-slate-300 font-bold">
+                            {Math.max(0, deadlineHours - (detPol?.waitingTimeHours || 0) - durationHours)}h
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="pt-3 border-t border-slate-800/80 text-[11px] text-slate-400 leading-relaxed">
+                      {(detPol?.estimatedDeadlineRisk || 0) > riskTolerance
+                        ? `Greedily chases lowest point forecast, but uncertainty pushes risk to ${((detPol?.estimatedDeadlineRisk || 0) * 100).toFixed(1)}%, exceeding safety threshold.`
+                        : 'Selects the lowest point forecast window without accounting for forecast uncertainty variance.'}
+                    </div>
+                  </div>
+
+                  {/* Option 3: CarbonRoute Optimum */}
+                  <div className="p-5 rounded-xl bg-emerald-950/20 border-2 border-emerald-500/60 space-y-4 flex flex-col justify-between shadow-lg shadow-emerald-950/40 relative">
+                    <div className="absolute -top-3 right-4 px-2 py-0.5 bg-emerald-500 text-slate-950 text-[10px] font-extrabold rounded-full uppercase tracking-wider">
+                      Optimal Balance
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                          Option 3: CarbonRoute
+                        </span>
+                        <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-900/60 border border-emerald-500/40 text-emerald-300">
+                          T+{recPol.waitingTimeHours}:00
+                        </span>
+                      </div>
+                      <div className="mt-3 space-y-2">
+                        <div className="text-2xl font-extrabold text-emerald-300">
+                          {recCarbon} <span className="text-xs font-normal text-slate-400">gCO2</span>
+                        </div>
+                        <div className="flex items-center space-x-2 text-xs">
+                          <span className="text-slate-400">Wait Delay:</span>
+                          <span className="text-white font-bold">+{recPol.waitingTimeHours} Hours</span>
+                        </div>
+                        <div className="flex items-center space-x-2 text-xs">
+                          <span className="text-slate-400">Deadline Risk:</span>
+                          <span className="text-emerald-400 font-bold">
+                            {((recPol.estimatedDeadlineRisk || 0) * 100).toFixed(1)}% &le; {(riskTolerance * 100).toFixed(0)}%
+                          </span>
+                        </div>
+                        <div className="flex items-center space-x-2 text-xs">
+                          <span className="text-slate-400">Carbon Savings:</span>
+                          <span className="text-emerald-300 font-bold">
+                            -{decision.comparisonSummary.carbonSavingsVsImmediatePct}% vs Immediate
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="pt-3 border-t border-emerald-500/20 text-[11px] text-emerald-200/90 leading-relaxed">
+                      Mathematically bounds risk below user tolerance &tau; while maximizing emissions reduction. The provable sweet spot.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* 5 Schedulers Policy Comparison Table */}
           <div className="glass-card rounded-2xl p-6 sm:p-8 border border-slate-800 space-y-4">
