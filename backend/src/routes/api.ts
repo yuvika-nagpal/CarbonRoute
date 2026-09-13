@@ -12,6 +12,7 @@ import {
   getResources,
   getAllResourcesAdmin,
   createResource,
+  updateResource,
   deleteResource,
 } from '../controllers/resourceController';
 import { getTeam, updateTeamMember } from '../controllers/teamController';
@@ -79,6 +80,7 @@ router.post(
   uploadMiddleware.single('file'),
   createResource
 );
+router.put('/resources/:id', authenticateToken, requireAdmin, updateResource);
 router.delete('/resources/:id', authenticateToken, requireAdmin, deleteResource);
 
 // Team Members Routes

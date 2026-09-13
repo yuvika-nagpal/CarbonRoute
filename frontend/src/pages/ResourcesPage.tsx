@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import { api, resolveFileUrl } from '../services/api';
 import { Resource } from '../types';
-import { RESOURCE_CATEGORIES, ProjectDeliverable } from '../data/resourcesData';
+import { RESOURCE_CATEGORIES } from '../data/resourcesData';
 
 export const ResourcesPage: React.FC = () => {
   const [resources, setResources] = useState<Resource[]>([]);
@@ -68,6 +68,7 @@ export const ResourcesPage: React.FC = () => {
   const handleDownload = (res: Resource, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     const fileUrl = resolveFileUrl(res.fileUrl, res.filePath, res.fileName);
+    if (!fileUrl) return;
     const link = document.createElement('a');
     link.href = fileUrl.includes('?') ? `${fileUrl}&download=true` : `${fileUrl}?download=true`;
     link.setAttribute('download', res.fileName || `${res.title.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`);
@@ -80,21 +81,19 @@ export const ResourcesPage: React.FC = () => {
 
   const handleView = (res: Resource) => {
     const fileUrl = resolveFileUrl(res.fileUrl, res.filePath, res.fileName);
+    if (!fileUrl) return;
+
     if (res.isExternal || fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
       window.open(fileUrl, '_blank', 'noopener,noreferrer');
       return;
     }
 
-    if (res.format === 'link' || res.fileUrl?.startsWith('/')) {
-      if (fileUrl.endsWith('.pdf')) {
-        setPreviewResource(res);
-      } else {
-        window.open(fileUrl, '_blank', 'noopener,noreferrer');
-      }
+    if (fileUrl.endsWith('.pdf')) {
+      setPreviewResource(res);
       return;
     }
 
-    setPreviewResource(res);
+    window.open(fileUrl, '_blank', 'noopener,noreferrer');
   };
 
   const getFormatIcon = (format?: string, type?: string) => {
@@ -206,9 +205,30 @@ export const ResourcesPage: React.FC = () => {
           <RefreshCw className="w-6 h-6 animate-spin text-emerald-400" />
           <span>Loading project deliverables library...</span>
         </div>
+      ) : resources.length === 0 ? (
+        <div className="p-16 text-center text-slate-400 font-mono glass-card rounded-2xl border border-slate-800 space-y-4">
+          <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mx-auto text-emerald-400">
+            <FolderDown className="w-8 h-8" />
+          </div>
+          <div className="space-y-1">
+            <h3 className="text-base font-bold text-white font-mono">No resources uploaded yet.</h3>
+            <p className="text-xs text-slate-400 max-w-md mx-auto">
+              Upload presentations, reports, and project documents from the Admin panel.
+            </p>
+          </div>
+          <div className="pt-2">
+            <a
+              href="/admin"
+              className="inline-flex items-center space-x-2 px-4 py-2 rounded-xl bg-emerald-500 text-slate-950 font-bold hover:bg-emerald-400 text-xs font-mono transition-colors shadow-sm"
+            >
+              <ShieldCheck className="w-4 h-4" />
+              <span>Go to Admin Panel &rarr;</span>
+            </a>
+          </div>
+        </div>
       ) : filteredResources.length === 0 ? (
         <div className="p-16 text-center text-slate-400 font-mono text-xs glass-card rounded-2xl border border-slate-800 space-y-3">
-          <FolderDown className="w-8 h-8 mx-auto text-slate-600" />
+          <Filter className="w-8 h-8 mx-auto text-slate-600" />
           <p className="text-white font-bold text-sm">No deliverables found</p>
           <p className="text-slate-400 text-xs max-w-sm mx-auto">
             {searchQuery
@@ -233,6 +253,7 @@ export const ResourcesPage: React.FC = () => {
             const isPdf = res.format === 'pdf' || res.fileName?.endsWith('.pdf') || res.fileUrl?.endsWith('.pdf');
             const isExternalLink = res.isExternal || res.actionType === 'external' || res.format === 'link';
             const fileUrl = resolveFileUrl(res.fileUrl, res.filePath, res.fileName);
+            const hasFile = Boolean(fileUrl && fileUrl.trim().length > 0 && !fileUrl.endsWith('/undefined'));
 
             return (
               <div
@@ -301,34 +322,42 @@ export const ResourcesPage: React.FC = () => {
                   </div>
 
                   <div className="flex items-center space-x-2">
-                    {/* View Button */}
-                    <button
-                      onClick={() => handleView(res)}
-                      className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-emerald-500/50 text-slate-200 hover:text-emerald-300 font-mono text-xs flex items-center space-x-1.5 transition-colors"
-                      title={isExternalLink ? 'Open External Resource' : 'View Deliverable'}
-                    >
-                      {isExternalLink ? (
-                        <>
-                          <ExternalLink className="w-3.5 h-3.5" />
-                          <span>Open</span>
-                        </>
-                      ) : (
-                        <>
-                          <Eye className="w-3.5 h-3.5" />
-                          <span>View</span>
-                        </>
-                      )}
-                    </button>
+                    {hasFile ? (
+                      <>
+                        {/* View Button */}
+                        <button
+                          onClick={() => handleView(res)}
+                          className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-emerald-500/50 text-slate-200 hover:text-emerald-300 font-mono text-xs flex items-center space-x-1.5 transition-colors"
+                          title={isExternalLink ? 'Open External Resource' : 'View Deliverable'}
+                        >
+                          {isExternalLink ? (
+                            <>
+                              <ExternalLink className="w-3.5 h-3.5" />
+                              <span>Open</span>
+                            </>
+                          ) : (
+                            <>
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>View</span>
+                            </>
+                          )}
+                        </button>
 
-                    {/* Download Button (for files) */}
-                    {(isPdf || res.format === 'docx' || res.format === 'xlsx' || res.format === 'zip' || (res.fileName && !isExternalLink)) && (
-                      <button
-                        onClick={(e) => handleDownload(res, e)}
-                        className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-white transition-colors"
-                        title="Download file"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                      </button>
+                        {/* Download Button (for binary files) */}
+                        {!isExternalLink && (
+                          <button
+                            onClick={(e) => handleDownload(res, e)}
+                            className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-white transition-colors"
+                            title="Download file"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </>
+                    ) : (
+                      <span className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-slate-500 text-[11px] font-mono italic">
+                        File unavailable
+                      </span>
                     )}
                   </div>
                 </div>
@@ -345,9 +374,9 @@ export const ResourcesPage: React.FC = () => {
             <Sparkles className="w-4 h-4" />
           </div>
           <div>
-            <div className="text-white font-bold">Extensible Deliverables Architecture</div>
+            <div className="text-white font-bold">Project Deliverables Repository</div>
             <div className="text-slate-500 text-[11px]">
-              Upload new deliverables via Admin portal or register entries directly in resourcesData.ts.
+              Upload presentations, reports, and project documents through the Admin portal.
             </div>
           </div>
         </div>

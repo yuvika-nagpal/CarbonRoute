@@ -41,7 +41,7 @@ export interface PresentationItem {
 export interface Resource {
   id: string;
   title: string;
-  category: 'presentation' | 'report' | 'dataset' | 'diagram' | 'documentation';
+  category: string;
   description: string;
   fileName: string;
   filePath: string;
@@ -50,6 +50,12 @@ export interface Resource {
   fileUrl: string;
   isPublished: boolean;
   createdAt: string;
+  authors?: string;
+  version?: string;
+  date?: string;
+  type?: string;
+  format?: string;
+  badge?: string;
 }
 
 export interface TeamMember {
@@ -541,7 +547,13 @@ class JsonDatabase {
   // Resources Operations
   getResources(category?: string): Resource[] {
     if (category && category !== 'all') {
-      return this.data.resources.filter((r) => r.category === category && r.isPublished);
+      const norm = category.toLowerCase().replace(/[^a-z0-9]/g, '');
+      return this.data.resources.filter(
+        (r) =>
+          r.isPublished &&
+          (r.category.toLowerCase().replace(/[^a-z0-9]/g, '') === norm ||
+            (r.type && r.type.toLowerCase().replace(/[^a-z0-9]/g, '') === norm))
+      );
     }
     return this.data.resources.filter((r) => r.isPublished);
   }
@@ -559,6 +571,17 @@ class JsonDatabase {
     this.data.resources.unshift(newResource);
     this.saveDatabase();
     return newResource;
+  }
+
+  updateResource(id: string, updates: Partial<Resource>): Resource | null {
+    const idx = this.data.resources.findIndex((r) => r.id === id);
+    if (idx === -1) return null;
+    this.data.resources[idx] = {
+      ...this.data.resources[idx],
+      ...updates,
+    };
+    this.saveDatabase();
+    return this.data.resources[idx];
   }
 
   deleteResource(id: string): boolean {

@@ -52,6 +52,14 @@ export const AdminPage: React.FC = () => {
   const [editChangeSummary, setEditChangeSummary] = useState<string>('');
   const [editDescription, setEditDescription] = useState<string>('');
 
+  // Edit Metadata Modal State (Resources)
+  const [editingResource, setEditingResource] = useState<Resource | null>(null);
+  const [editResourceTitle, setEditResourceTitle] = useState<string>('');
+  const [editResourceCategory, setEditResourceCategory] = useState<string>('');
+  const [editResourceVersion, setEditResourceVersion] = useState<string>('');
+  const [editResourceAuthors, setEditResourceAuthors] = useState<string>('');
+  const [editResourceDescription, setEditResourceDescription] = useState<string>('');
+
   const loadAdminData = async () => {
     setDataLoading(true);
     try {
@@ -139,6 +147,29 @@ export const AdminPage: React.FC = () => {
       }
     } catch (err) {
       console.error('Failed to delete resource deliverable:', err);
+    }
+  };
+
+  const handleSaveResourceMetadata = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingResource) return;
+
+    try {
+      const res = await api.updateResource(editingResource.id, {
+        title: editResourceTitle,
+        category: editResourceCategory,
+        version: editResourceVersion,
+        authors: editResourceAuthors,
+        description: editResourceDescription,
+      });
+
+      if (res.success) {
+        setStatusMessage(`Updated metadata for deliverable "${editingResource.title}".`);
+        setEditingResource(null);
+        loadAdminData();
+      }
+    } catch (err) {
+      console.error('Failed to update resource metadata:', err);
     }
   };
 
@@ -367,7 +398,7 @@ export const AdminPage: React.FC = () => {
           <div className="glass-card rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
             {resources.length === 0 ? (
               <div className="p-12 text-center text-slate-400 font-mono text-xs">
-                No custom resources uploaded yet. Default resources are loaded from central configuration.
+                No resources uploaded yet. Click &quot;Upload New Deliverable&quot; above to upload presentations, reports, or project documents.
               </div>
             ) : (
               <table className="w-full text-left text-xs">
@@ -418,6 +449,20 @@ export const AdminPage: React.FC = () => {
                               <Eye className="w-3.5 h-3.5" />
                             </a>
                           )}
+                          <button
+                            onClick={() => {
+                              setEditingResource(r);
+                              setEditResourceTitle(r.title);
+                              setEditResourceCategory(r.category);
+                              setEditResourceVersion(r.version || 'v1.0');
+                              setEditResourceAuthors(r.authors || '');
+                              setEditResourceDescription(r.description || '');
+                            }}
+                            className="p-1.5 rounded-lg bg-slate-900 text-slate-300 hover:text-teal-400 border border-slate-800 inline-block"
+                            title="Edit Deliverable Metadata"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
                           <button
                             onClick={() => handleDeleteResource(r)}
                             className="p-1.5 rounded-lg bg-rose-950/40 text-rose-400 hover:text-rose-200 border border-rose-900/50 inline-block"
@@ -663,6 +708,109 @@ export const AdminPage: React.FC = () => {
                 <button
                   type="submit"
                   className="px-4 py-2 rounded-lg bg-emerald-500 text-slate-950 font-bold hover:bg-emerald-400"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Resource Metadata Modal */}
+      {editingResource && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
+          <div className="glass-card rounded-2xl p-6 border border-slate-700 w-full max-w-lg space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-base font-bold text-white font-mono flex items-center space-x-2">
+                <Edit3 className="w-4 h-4 text-emerald-400" />
+                <span>Edit Deliverable: {editingResource.title}</span>
+              </h3>
+              <button
+                onClick={() => setEditingResource(null)}
+                className="text-slate-400 hover:text-white"
+              >
+                &times;
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveResourceMetadata} className="space-y-3 text-xs font-mono">
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Title *</label>
+                <input
+                  type="text"
+                  value={editResourceTitle}
+                  onChange={(e) => setEditResourceTitle(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500 font-mono"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Category *</label>
+                  <select
+                    value={editResourceCategory}
+                    onChange={(e) => setEditResourceCategory(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500 font-mono"
+                  >
+                    <option value="Planning">Planning</option>
+                    <option value="Research">Research</option>
+                    <option value="Documentation">Documentation</option>
+                    <option value="Presentations">Presentations</option>
+                    <option value="Design">Design</option>
+                    <option value="Development">Development</option>
+                    <option value="Testing">Testing</option>
+                    <option value="Dataset / ML">Dataset / ML</option>
+                    <option value="Reports">Reports</option>
+                    <option value="Prototype">Prototype</option>
+                    <option value="Final Deliverables">Final Deliverables</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Version</label>
+                  <input
+                    type="text"
+                    value={editResourceVersion}
+                    onChange={(e) => setEditResourceVersion(e.target.value)}
+                    placeholder="v1.0"
+                    className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Authors / Contributors</label>
+                <input
+                  type="text"
+                  value={editResourceAuthors}
+                  onChange={(e) => setEditResourceAuthors(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Description</label>
+                <textarea
+                  value={editResourceDescription}
+                  onChange={(e) => setEditResourceDescription(e.target.value)}
+                  rows={3}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500 font-mono"
+                />
+              </div>
+
+              <div className="pt-3 border-t border-slate-800 flex justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingResource(null)}
+                  className="px-4 py-2 rounded-lg bg-slate-900 text-slate-400 hover:text-white border border-slate-800 font-mono"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-lg bg-emerald-500 text-slate-950 font-bold hover:bg-emerald-400 font-mono"
                 >
                   Save Changes
                 </button>

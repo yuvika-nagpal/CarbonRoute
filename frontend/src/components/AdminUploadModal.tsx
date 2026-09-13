@@ -105,6 +105,9 @@ export const AdminUploadModal: React.FC<AdminUploadModalProps> = ({
         formData.append('category', resourceCategory);
         formData.append('description', description);
         formData.append('isPublished', 'true');
+        formData.append('authors', authors);
+        formData.append('version', versionTag || 'v1.0');
+        formData.append('date', presentationDate || new Date().toISOString().split('T')[0]);
 
         const res = await api.uploadResource(formData);
         if (res.success) {
@@ -278,28 +281,71 @@ export const AdminUploadModal: React.FC<AdminUploadModalProps> = ({
 
             {/* Resource-Specific Fields */}
             {uploadTarget === 'resource' ? (
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1 font-mono">
-                  Category *
-                </label>
-                <select
-                  value={resourceCategory}
-                  onChange={(e) => setResourceCategory(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500 font-mono"
-                >
-                  <option value="Planning">Planning</option>
-                  <option value="Research">Research</option>
-                  <option value="Documentation">Documentation</option>
-                  <option value="Presentations">Presentations</option>
-                  <option value="Design">Design</option>
-                  <option value="Development">Development</option>
-                  <option value="Testing">Testing</option>
-                  <option value="Dataset / ML">Dataset / ML</option>
-                  <option value="Reports">Reports</option>
-                  <option value="Prototype">Prototype</option>
-                  <option value="Final Deliverables">Final Deliverables</option>
-                </select>
-              </div>
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1 font-mono">
+                      Category *
+                    </label>
+                    <select
+                      value={resourceCategory}
+                      onChange={(e) => setResourceCategory(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500 font-mono"
+                    >
+                      <option value="Planning">Planning</option>
+                      <option value="Research">Research</option>
+                      <option value="Documentation">Documentation</option>
+                      <option value="Presentations">Presentations</option>
+                      <option value="Design">Design</option>
+                      <option value="Development">Development</option>
+                      <option value="Testing">Testing</option>
+                      <option value="Dataset / ML">Dataset / ML</option>
+                      <option value="Reports">Reports</option>
+                      <option value="Prototype">Prototype</option>
+                      <option value="Final Deliverables">Final Deliverables</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1 font-mono">
+                      Version (e.g. v1.0, Final)
+                    </label>
+                    <input
+                      type="text"
+                      value={versionTag}
+                      onChange={(e) => setVersionTag(e.target.value)}
+                      placeholder="v1.0"
+                      className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white font-mono placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1 font-mono">
+                      Date
+                    </label>
+                    <input
+                      type="date"
+                      value={presentationDate}
+                      onChange={(e) => setPresentationDate(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white font-mono focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1 font-mono">
+                      Authors / Contributors
+                    </label>
+                    <input
+                      type="text"
+                      value={authors}
+                      onChange={(e) => setAuthors(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white font-mono focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+              </>
             ) : (
               /* Presentation-Specific Fields */
               <>

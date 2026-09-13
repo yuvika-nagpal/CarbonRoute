@@ -14,7 +14,6 @@ import {
   K8sJobExecutionRecord,
   ExperimentRecord,
 } from '../types';
-import { DEFAULT_PROJECT_RESOURCES } from '../data/resourcesData';
 
 export const BACKEND_URL =
   ((import.meta as any).env?.VITE_API_URL as string)?.replace(/\/api\/?$/, '') ||
@@ -478,71 +477,35 @@ export const api = {
 
   // Resources
   async getResources(category?: string): Promise<ApiResponse<Resource[]>> {
-    const staticResources: Resource[] = DEFAULT_PROJECT_RESOURCES.map((d) => ({
-      id: d.id,
-      title: d.title,
-      description: d.description,
-      category: d.category,
-      type: d.type,
-      format: d.format,
-      fileName: d.format === 'pdf' ? `${d.title}.pdf` : undefined,
-      fileUrl: d.url.startsWith('http') || d.url.startsWith('/') ? d.url : resolveFileUrl(d.url),
-      date: d.date,
-      version: d.version,
-      fileSize: d.fileSize ? parseInt(d.fileSize.replace(/[^0-9]/g, ''), 10) * 1024 : undefined,
-      actionType: d.actionType,
-      isExternal: d.isExternal,
-      badge: d.badge,
-      authors: d.authors,
-      isPublished: true,
-      createdAt: new Date().toISOString(),
-    }));
-
-    const filterCategory = (items: Resource[]) => {
-      if (!category || category === 'all') return items;
-      const normCat = category.toLowerCase().replace(/[^a-z]/g, '');
-      return items.filter(
-        (r) =>
-          r.category.toLowerCase().replace(/[^a-z]/g, '') === normCat ||
-          (r.type && r.type.toLowerCase().replace(/[^a-z]/g, '') === normCat)
-      );
-    };
-
     try {
       const query = category && category !== 'all' ? `?category=${encodeURIComponent(category)}` : '';
       const res = await fetch(`${API_BASE}/resources${query}`, { headers: getHeaders() });
       if (res.ok) {
-        const json = await res.json();
-        if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+        const json = await res.json().catch(() => null);
+        if (json && json.success && Array.isArray(json.data)) {
           const apiItems: Resource[] = json.data.map((r: Resource) => ({
             ...r,
             fileUrl: resolveFileUrl(r.fileUrl, r.filePath, r.fileName),
           }));
-          const existingIds = new Set(apiItems.map((i) => i.id));
-          const existingTitles = new Set(apiItems.map((i) => i.title.toLowerCase().trim()));
-          const combined = [
-            ...apiItems,
-            ...staticResources.filter(
-              (s) => !existingIds.has(s.id) && !existingTitles.has(s.title.toLowerCase().trim())
-            ),
-          ];
           return {
             success: true,
-            data: filterCategory(combined),
+            data: apiItems,
           };
         }
       }
-    } catch {}
-
-    return { success: true, data: filterCategory(staticResources) };
+      return { success: true, data: [] };
+    } catch (err: any) {
+      console.warn('Could not fetch resources from backend:', err?.message);
+      return { success: true, data: [] };
+    }
   },
 
   async getAllResourcesAdmin(): Promise<ApiResponse<Resource[]>> {
     try {
       const res = await fetch(`${API_BASE}/resources/all`, { headers: getHeaders() });
       if (res.ok) {
-        const json = await res.json();
-        if (json.success && Array.isArray(json.data)) {
+        const json = await res.json().catch(() => null);
+        if (json && json.success && Array.isArray(json.data)) {
           return {
             ...json,
             data: json.data.map((r: Resource) => ({
@@ -556,31 +519,72 @@ export const api = {
     return { success: true, data: [] };
   },
 
-  async uploadResource(formData?: FormData): Promise<ApiResponse<Resource>> {
+  async uploadResource(formData: FormData): Promise<ApiResponse<Resource>> {
     try {
-      if (formData) {
-        const res = await fetch(`${API_BASE}/resources/upload`, {
-          method: 'POST',
-          headers: getHeaders(true),
-          body: formData,
-        });
-        if (res.ok) return await res.json();
+      const res = await fetch(`${API_BASE}/resources/upload`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: formData,
+      });
+      const json = await res.json().catch(() => null);
+      if (res.ok && json && json.success) {
+        return json;
       }
-    } catch {}
-    return { success: true, data: {} as Resource };
+      return {
+        success: false,
+        message: json?.message || `Upload failed (HTTP ${res.status}: ${res.statusText})`,
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        message: err.message || 'Network error uploading deliverable.',
+      };
+    }
   },
 
-  async deleteResource(id?: string): Promise<ApiResponse<void>> {
+  async updateResource(id: string, updates: Partial<Resource>): Promise<ApiResponse<Resource>> {
     try {
-      if (id) {
-        const res = await fetch(`${API_BASE}/resources/${id}`, {
-          method: 'DELETE',
-          headers: getHeaders(),
-        });
-        if (res.ok) return await res.json();
+      const res = await fetch(`${API_BASE}/resources/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        headers: getHeaders(),
+        body: JSON.stringify(updates),
+      });
+      const json = await res.json().catch(() => null);
+      if (res.ok && json && json.success) {
+        return json;
       }
-    } catch {}
-    return { success: true };
+      return {
+        success: false,
+        message: json?.message || `Failed to update resource (HTTP ${res.status})`,
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        message: err.message || 'Network error updating resource.',
+      };
+    }
+  },
+
+  async deleteResource(id: string): Promise<ApiResponse<void>> {
+    try {
+      const res = await fetch(`${API_BASE}/resources/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: getHeaders(),
+      });
+      const json = await res.json().catch(() => null);
+      if (res.ok && json && json.success) {
+        return json;
+      }
+      return {
+        success: false,
+        message: json?.message || `Failed to delete resource (HTTP ${res.status})`,
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        message: err.message || 'Network error deleting deliverable.',
+      };
+    }
   },
 
   // Team

@@ -1,3 +1,4 @@
+import path from 'path';
 import { Request, Response } from 'express';
 import { db } from '../models/db';
 import { storageProvider } from '../storage/storageProvider';
@@ -15,7 +16,7 @@ export const getResources = (req: Request, res: Response) => {
 
 export const getAllResourcesAdmin = (req: AuthRequest, res: Response) => {
   const category = typeof req.query.category === 'string' ? req.query.category : undefined;
-  const resources = db.getResources(category);
+  const resources = db.getAllResourcesAdmin();
 
   return res.json({
     success: true,
@@ -33,7 +34,7 @@ export const createResource = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    const { title, category, description, isPublished } = req.body;
+    const { title, category, description, isPublished, authors, version, date, type, format } = req.body;
 
     if (!title || !category) {
       return res.status(400).json({
@@ -44,16 +45,31 @@ export const createResource = async (req: AuthRequest, res: Response) => {
 
     const stored = await storageProvider.saveFile(file, 'resources');
 
+    // Determine format from extension / mimetype if not explicitly passed
+    const ext = path.extname(file.originalname).toLowerCase().replace('.', '');
+    let resolvedFormat = format || ext;
+    if (file.mimetype?.includes('pdf') || ext === 'pdf') resolvedFormat = 'pdf';
+    else if (file.mimetype?.includes('word') || ext === 'docx' || ext === 'doc') resolvedFormat = 'docx';
+    else if (file.mimetype?.includes('sheet') || ext === 'xlsx' || ext === 'xls') resolvedFormat = 'xlsx';
+    else if (file.mimetype?.includes('presentation') || ext === 'ppt' || ext === 'pptx') resolvedFormat = 'ppt';
+    else if (file.mimetype?.includes('zip') || ext === 'zip') resolvedFormat = 'zip';
+    else if (file.mimetype?.includes('json') || ext === 'json') resolvedFormat = 'json';
+
     const newResource = db.addResource({
-      title: String(title),
-      category: category as any,
-      description: description ? String(description) : '',
+      title: String(title).trim(),
+      category: String(category).trim(),
+      description: description ? String(description).trim() : '',
       fileName: stored.fileName,
       filePath: stored.filePath,
       fileSize: stored.fileSize,
       mimeType: stored.mimeType,
       fileUrl: stored.fileUrl,
-      isPublished: isPublished === 'true' || isPublished === true,
+      isPublished: isPublished === undefined || isPublished === 'true' || isPublished === true,
+      authors: authors ? String(authors).trim() : (req.user?.username || 'Team TriFlux'),
+      version: version ? String(version).trim() : 'v1.0',
+      date: date ? String(date).trim() : new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' }),
+      type: type ? String(type).trim() : String(category),
+      format: resolvedFormat,
     });
 
     db.addAuditLog(
@@ -76,6 +92,33 @@ export const createResource = async (req: AuthRequest, res: Response) => {
       message: error.message || 'Failed to upload resource.',
     });
   }
+};
+
+export const updateResource = (req: AuthRequest, res: Response) => {
+  const id = String(req.params.id);
+  const updates = req.body;
+  const updated = db.updateResource(id, updates);
+
+  if (!updated) {
+    return res.status(404).json({
+      success: false,
+      message: 'Resource not found.',
+    });
+  }
+
+  db.addAuditLog(
+    'UPDATE_RESOURCE',
+    'Resource',
+    id,
+    `Resource updated: ${updated.title}`,
+    req.user ? req.user.username : 'System'
+  );
+
+  return res.json({
+    success: true,
+    message: 'Resource updated successfully.',
+    data: updated,
+  });
 };
 
 export const deleteResource = (req: AuthRequest, res: Response) => {
