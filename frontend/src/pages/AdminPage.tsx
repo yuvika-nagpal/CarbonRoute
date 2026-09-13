@@ -20,10 +20,12 @@ import {
   Layers,
   Archive,
   Send,
+  ExternalLink,
+  Download,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { api } from '../services/api';
-import { PresentationItem, TeamMember, RoadmapMilestone } from '../types';
+import { api, resolveFileUrl } from '../services/api';
+import { PresentationItem, Resource } from '../types';
 import { AdminUploadModal } from '../components/AdminUploadModal';
 
 export const AdminPage: React.FC = () => {
@@ -35,11 +37,14 @@ export const AdminPage: React.FC = () => {
 
   // Admin State
   const [presentations, setPresentations] = useState<PresentationItem[]>([]);
+  const [resources, setResources] = useState<Resource[]>([]);
+  const [adminTab, setAdminTab] = useState<'resources' | 'presentations'>('resources');
   const [uploadModalOpen, setUploadModalOpen] = useState<boolean>(false);
+  const [uploadModalTarget, setUploadModalTarget] = useState<'presentation' | 'resource'>('resource');
   const [dataLoading, setDataLoading] = useState<boolean>(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
-  // Edit Metadata Modal State
+  // Edit Metadata Modal State (Presentations)
   const [editingPresentation, setEditingPresentation] = useState<PresentationItem | null>(null);
   const [editTitle, setEditTitle] = useState<string>('');
   const [editDate, setEditDate] = useState<string>('');
@@ -50,9 +55,15 @@ export const AdminPage: React.FC = () => {
   const loadAdminData = async () => {
     setDataLoading(true);
     try {
-      const res = await api.getAllVersions();
-      if (res.success && res.data) {
-        setPresentations(res.data);
+      const [presRes, resRes] = await Promise.all([
+        api.getAllVersions(),
+        api.getAllResourcesAdmin(),
+      ]);
+      if (presRes.success && presRes.data) {
+        setPresentations(presRes.data);
+      }
+      if (resRes.success && resRes.data) {
+        setResources(resRes.data);
       }
     } catch (err) {
       console.error('Failed to load admin data:', err);
@@ -103,7 +114,7 @@ export const AdminPage: React.FC = () => {
     }
   };
 
-  const handleDelete = async (p: PresentationItem) => {
+  const handleDeletePresentation = async (p: PresentationItem) => {
     if (!confirm(`Are you sure you want to delete presentation "${p.title}" (${p.versionTag.toUpperCase()})?`)) return;
 
     try {
@@ -114,6 +125,20 @@ export const AdminPage: React.FC = () => {
       }
     } catch (err) {
       console.error('Failed to delete presentation:', err);
+    }
+  };
+
+  const handleDeleteResource = async (r: Resource) => {
+    if (!confirm(`Are you sure you want to delete deliverable "${r.title}"?`)) return;
+
+    try {
+      const res = await api.deleteResource(r.id);
+      if (res.success) {
+        setStatusMessage(`Deliverable "${r.title}" removed.`);
+        loadAdminData();
+      }
+    } catch (err) {
+      console.error('Failed to delete resource deliverable:', err);
     }
   };
 
@@ -202,34 +227,44 @@ export const AdminPage: React.FC = () => {
     );
   }
 
-  // Dashboard Calculations
-  const totalPresentations = presentations.length;
   const publishedCount = presentations.filter((p) => p.status === 'published').length;
   const draftsCount = presentations.filter((p) => p.status === 'draft').length;
-  const recentUploads = presentations.slice(0, 3);
+  const totalPresentations = presentations.length;
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
-      {/* 1. Header & Actions */}
-      <div className="glass-card rounded-2xl p-6 border border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
+      {/* 1. Admin Top Banner */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-800">
         <div>
-          <div className="flex items-center space-x-2 mb-1">
-            <span className="px-2.5 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 uppercase">
-              Authenticated Administrator
-            </span>
-            <span className="text-xs text-slate-400 font-mono">Session: {user?.username}</span>
+          <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-mono mb-2">
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>Admin Active: {user?.username}</span>
           </div>
-          <h1 className="text-2xl font-bold text-white font-mono">
-            CarbonRoute Content &amp; Deliverables Manager
+          <h1 className="text-2xl sm:text-3xl font-bold text-white font-mono">
+            CarbonRoute Deliverables &amp; Content Manager
           </h1>
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
           <button
-            onClick={() => setUploadModalOpen(true)}
+            onClick={() => {
+              setUploadModalTarget('resource');
+              setUploadModalOpen(true);
+            }}
             className="px-4 py-2 rounded-xl bg-emerald-500 text-slate-950 font-bold text-xs font-mono hover:bg-emerald-400 transition-colors flex items-center space-x-1.5 shadow-sm"
           >
             <Plus className="w-4 h-4" />
+            <span>Upload Deliverable</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setUploadModalTarget('presentation');
+              setUploadModalOpen(true);
+            }}
+            className="px-3.5 py-2 rounded-xl bg-slate-900 border border-emerald-500/40 text-emerald-300 font-bold text-xs font-mono hover:bg-slate-800 transition-colors flex items-center space-x-1.5 shadow-sm"
+          >
+            <Layers className="w-4 h-4" />
             <span>Upload Presentation</span>
           </button>
 
@@ -258,166 +293,294 @@ export const AdminPage: React.FC = () => {
       {/* 2. Admin Stats Dashboard */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
         <div className="p-5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-1">
-          <span className="text-xs text-slate-400 font-mono block">Total Deliverables</span>
-          <div className="text-2xl font-extrabold text-white font-mono">{totalPresentations}</div>
-          <span className="text-[10px] text-slate-500 font-mono">Archived across semester</span>
+          <span className="text-xs text-slate-400 font-mono block">Deliverables Registered</span>
+          <div className="text-2xl font-extrabold text-white font-mono">{resources.length}</div>
+          <span className="text-[10px] text-slate-500 font-mono">Visible in Resources library</span>
         </div>
 
         <div className="p-5 rounded-2xl bg-slate-900/80 border border-emerald-500/30 space-y-1">
-          <span className="text-xs text-emerald-400 font-mono block">Published Versions</span>
+          <span className="text-xs text-emerald-400 font-mono block">Published Presentations</span>
           <div className="text-2xl font-extrabold text-emerald-300 font-mono">{publishedCount}</div>
-          <span className="text-[10px] text-emerald-400 font-mono">Publicly accessible</span>
+          <span className="text-[10px] text-emerald-400 font-mono">Permanent decks</span>
         </div>
 
         <div className="p-5 rounded-2xl bg-slate-900/80 border border-amber-500/30 space-y-1">
-          <span className="text-xs text-amber-400 font-mono block">Draft / Upcoming</span>
+          <span className="text-xs text-amber-400 font-mono block">Draft Presentations</span>
           <div className="text-2xl font-extrabold text-amber-300 font-mono">{draftsCount}</div>
-          <span className="text-[10px] text-amber-400 font-mono">Unpublished releases</span>
+          <span className="text-[10px] text-amber-400 font-mono">Upcoming releases</span>
         </div>
 
         <div className="p-5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-1">
-          <span className="text-xs text-teal-400 font-mono block">Storage Retention</span>
-          <div className="text-2xl font-extrabold text-white font-mono">Immutable</div>
-          <span className="text-[10px] text-slate-500 font-mono">SHA-256 integrity active</span>
+          <span className="text-xs text-teal-400 font-mono block">Storage Backend</span>
+          <div className="text-2xl font-extrabold text-white font-mono">Active</div>
+          <span className="text-[10px] text-slate-500 font-mono">File uploads operational</span>
         </div>
       </div>
 
-      {/* 3. Manage Presentations Table */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-base font-bold text-white font-mono flex items-center space-x-2">
-            <FileText className="w-4 h-4 text-emerald-400" />
-            <span>Manage Presentations</span>
-          </h2>
-          <span className="text-xs text-slate-400 font-mono">
-            Policy: Prior published versions remain permanently preserved
-          </span>
-        </div>
+      {/* 3. Section Navigation Tabs */}
+      <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
+        <button
+          onClick={() => setAdminTab('resources')}
+          className={`px-4 py-2 rounded-xl text-xs font-mono font-bold transition-all flex items-center space-x-2 ${
+            adminTab === 'resources'
+              ? 'bg-emerald-500 text-slate-950 shadow-sm'
+              : 'text-slate-400 hover:text-white hover:bg-slate-900'
+          }`}
+        >
+          <FolderDown className="w-4 h-4" />
+          <span>Project Deliverables &amp; Resources ({resources.length})</span>
+        </button>
 
-        <div className="glass-card rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-slate-900 text-slate-400 font-mono text-[11px] border-b border-slate-800">
-              <tr>
-                <th className="p-3.5">Title &amp; Deliverable</th>
-                <th className="p-3.5">Type</th>
-                <th className="p-3.5">Version</th>
-                <th className="p-3.5">Date</th>
-                <th className="p-3.5">Status</th>
-                <th className="p-3.5">Authors</th>
-                <th className="p-3.5 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/60 text-slate-300">
-              {presentations.map((p) => {
-                const isPublished = p.status === 'published';
-                const isDraft = p.status === 'draft';
-                const isArchived = p.status === 'archived';
-                const targetUrl =
-                  p.deliverableType === 'planning' && p.versionTag === 'v1'
-                    ? '/presentations/planning/v1'
-                    : `/presentation/${p.versionTag}`;
+        <button
+          onClick={() => setAdminTab('presentations')}
+          className={`px-4 py-2 rounded-xl text-xs font-mono font-bold transition-all flex items-center space-x-2 ${
+            adminTab === 'presentations'
+              ? 'bg-emerald-500 text-slate-950 shadow-sm'
+              : 'text-slate-400 hover:text-white hover:bg-slate-900'
+          }`}
+        >
+          <FileText className="w-4 h-4" />
+          <span>Presentations ({presentations.length})</span>
+        </button>
+      </div>
 
-                return (
-                  <tr key={p.id} className="hover:bg-slate-900/40 font-mono">
-                    <td className="p-3.5">
-                      <div className="font-bold text-white text-xs">{p.title}</div>
-                      {p.changeSummary && (
-                        <div className="text-[10.5px] text-slate-400 truncate max-w-xs">{p.changeSummary}</div>
-                      )}
-                    </td>
-                    <td className="p-3.5 uppercase text-[10px] text-teal-400 font-bold">
-                      {p.deliverableType}
-                    </td>
-                    <td className="p-3.5 font-bold text-emerald-400">
-                      {p.versionTag.toUpperCase()}
-                      {p.versionTag === 'v1' && p.deliverableType === 'planning' && (
-                        <span className="ml-1 text-[9px] px-1.5 py-0.2 rounded bg-emerald-950 border border-emerald-800 text-emerald-300">
-                          Initial V1
-                        </span>
-                      )}
-                    </td>
-                    <td className="p-3.5 text-slate-400 text-[11px]">{p.presentationDate}</td>
-                    <td className="p-3.5">
-                      <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold ${
-                          isPublished
-                            ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
-                            : isDraft
-                            ? 'bg-amber-950 text-amber-300 border border-amber-800'
-                            : 'bg-slate-900 text-slate-400 border border-slate-800'
-                        }`}
-                      >
-                        {isPublished ? 'Published' : isDraft ? 'Draft' : 'Archived'}
-                      </span>
-                    </td>
-                    <td className="p-3.5 text-slate-400 text-[11px] truncate max-w-[140px]" title={p.authors?.join(', ')}>
-                      {p.authors?.join(', ') || 'Team'}
-                    </td>
-                    <td className="p-3.5 text-right space-x-1.5">
-                      {isPublished && (
-                        <a
-                          href={targetUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="p-1.5 rounded-lg bg-slate-900 text-slate-300 hover:text-emerald-400 border border-slate-800 inline-block"
-                          title="View Public Presentation Page"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                        </a>
-                      )}
+      {/* 4A. Manage Project Deliverables (Resources) */}
+      {adminTab === 'resources' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-bold text-white font-mono flex items-center space-x-2">
+              <FolderDown className="w-4 h-4 text-emerald-400" />
+              <span>Project Deliverables Library</span>
+            </h2>
+            <button
+              onClick={() => {
+                setUploadModalTarget('resource');
+                setUploadModalOpen(true);
+              }}
+              className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-emerald-400 hover:text-emerald-300 text-xs font-mono flex items-center space-x-1"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Upload New Deliverable</span>
+            </button>
+          </div>
 
-                      <button
-                        onClick={() => {
-                          setEditingPresentation(p);
-                          setEditTitle(p.title);
-                          setEditDate(p.presentationDate);
-                          setEditAuthors(p.authors ? p.authors.join(', ') : '');
-                          setEditChangeSummary(p.changeSummary || '');
-                          setEditDescription(p.description || '');
-                        }}
-                        className="p-1.5 rounded-lg bg-slate-900 text-slate-300 hover:text-teal-400 border border-slate-800 inline-block"
-                        title="Edit Metadata"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                      </button>
-
-                      <button
-                        onClick={() => handleTogglePublish(p)}
-                        className={`px-2 py-1 rounded-lg border text-[10px] ${
-                          isPublished
-                            ? 'bg-slate-900 text-amber-300 border-slate-800 hover:border-amber-500/40'
-                            : 'bg-emerald-950/80 text-emerald-300 border-emerald-800/80 hover:bg-emerald-900'
-                        }`}
-                        title={isPublished ? 'Unpublish to Draft' : 'Publish to Public Site'}
-                      >
-                        {isPublished ? 'Unpublish' : 'Publish'}
-                      </button>
-
-                      {!isArchived && (
-                        <button
-                          onClick={() => handleArchive(p)}
-                          className="p-1.5 rounded-lg bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800 inline-block"
-                          title="Archive"
-                        >
-                          <Archive className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-
-                      <button
-                        onClick={() => handleDelete(p)}
-                        className="p-1.5 rounded-lg bg-rose-950/40 text-rose-400 hover:text-rose-200 border border-rose-900/50 inline-block"
-                        title="Delete Presentation"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </td>
+          <div className="glass-card rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
+            {resources.length === 0 ? (
+              <div className="p-12 text-center text-slate-400 font-mono text-xs">
+                No custom resources uploaded yet. Default resources are loaded from central configuration.
+              </div>
+            ) : (
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-900 text-slate-400 font-mono text-[11px] border-b border-slate-800">
+                  <tr>
+                    <th className="p-3.5">Title &amp; Description</th>
+                    <th className="p-3.5">Category</th>
+                    <th className="p-3.5">File Name</th>
+                    <th className="p-3.5">Size</th>
+                    <th className="p-3.5">Date Added</th>
+                    <th className="p-3.5 text-right">Actions</th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 text-slate-300">
+                  {resources.map((r) => {
+                    const fileUrl = resolveFileUrl(r.fileUrl, r.filePath, r.fileName);
+                    return (
+                      <tr key={r.id} className="hover:bg-slate-900/40 font-mono">
+                        <td className="p-3.5">
+                          <div className="font-bold text-white text-xs">{r.title}</div>
+                          {r.description && (
+                            <div className="text-[10.5px] text-slate-400 truncate max-w-sm">{r.description}</div>
+                          )}
+                        </td>
+                        <td className="p-3.5">
+                          <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 font-bold">
+                            {r.category}
+                          </span>
+                        </td>
+                        <td className="p-3.5 text-slate-400 text-[11px] truncate max-w-[160px]">
+                          {r.fileName || 'Linked File'}
+                        </td>
+                        <td className="p-3.5 text-slate-400 text-[11px]">
+                          {r.fileSize ? `${Math.round(r.fileSize / 1024)} KB` : 'N/A'}
+                        </td>
+                        <td className="p-3.5 text-slate-400 text-[11px]">
+                          {r.createdAt ? new Date(r.createdAt).toLocaleDateString() : 'Active'}
+                        </td>
+                        <td className="p-3.5 text-right space-x-1.5">
+                          {fileUrl && (
+                            <a
+                              href={fileUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="p-1.5 rounded-lg bg-slate-900 text-slate-300 hover:text-emerald-400 border border-slate-800 inline-block"
+                              title="View Document"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                            </a>
+                          )}
+                          <button
+                            onClick={() => handleDeleteResource(r)}
+                            className="p-1.5 rounded-lg bg-rose-950/40 text-rose-400 hover:text-rose-200 border border-rose-900/50 inline-block"
+                            title="Delete Resource"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* 4B. Manage Presentations Table */}
+      {adminTab === 'presentations' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-bold text-white font-mono flex items-center space-x-2">
+              <FileText className="w-4 h-4 text-emerald-400" />
+              <span>Manage Presentations</span>
+            </h2>
+            <button
+              onClick={() => {
+                setUploadModalTarget('presentation');
+                setUploadModalOpen(true);
+              }}
+              className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-emerald-400 hover:text-emerald-300 text-xs font-mono flex items-center space-x-1"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Upload Presentation</span>
+            </button>
+          </div>
+
+          <div className="glass-card rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-900 text-slate-400 font-mono text-[11px] border-b border-slate-800">
+                <tr>
+                  <th className="p-3.5">Title &amp; Deliverable</th>
+                  <th className="p-3.5">Type</th>
+                  <th className="p-3.5">Version</th>
+                  <th className="p-3.5">Date</th>
+                  <th className="p-3.5">Status</th>
+                  <th className="p-3.5">Authors</th>
+                  <th className="p-3.5 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60 text-slate-300">
+                {presentations.map((p) => {
+                  const isPublished = p.status === 'published';
+                  const isDraft = p.status === 'draft';
+                  const isArchived = p.status === 'archived';
+                  const targetUrl =
+                    p.deliverableType === 'planning' && p.versionTag === 'v1'
+                      ? '/presentations/planning/v1'
+                      : `/presentation/${p.versionTag}`;
+
+                  return (
+                    <tr key={p.id} className="hover:bg-slate-900/40 font-mono">
+                      <td className="p-3.5">
+                        <div className="font-bold text-white text-xs">{p.title}</div>
+                        {p.changeSummary && (
+                          <div className="text-[10.5px] text-slate-400 truncate max-w-xs">{p.changeSummary}</div>
+                        )}
+                      </td>
+                      <td className="p-3.5 uppercase text-[10px] text-teal-400 font-bold">
+                        {p.deliverableType}
+                      </td>
+                      <td className="p-3.5 font-bold text-emerald-400">
+                        {p.versionTag.toUpperCase()}
+                        {p.versionTag === 'v1' && p.deliverableType === 'planning' && (
+                          <span className="ml-1 text-[9px] px-1.5 py-0.2 rounded bg-emerald-950 border border-emerald-800 text-emerald-300">
+                            Initial V1
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-3.5 text-slate-400 text-[11px]">{p.presentationDate}</td>
+                      <td className="p-3.5">
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold ${
+                            isPublished
+                              ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                              : isDraft
+                              ? 'bg-amber-950 text-amber-300 border border-amber-800'
+                              : 'bg-slate-900 text-slate-400 border border-slate-800'
+                          }`}
+                        >
+                          {isPublished ? 'Published' : isDraft ? 'Draft' : 'Archived'}
+                        </span>
+                      </td>
+                      <td className="p-3.5 text-slate-400 text-[11px] truncate max-w-[140px]" title={p.authors?.join(', ')}>
+                        {p.authors?.join(', ') || 'Team'}
+                      </td>
+                      <td className="p-3.5 text-right space-x-1.5">
+                        {isPublished && (
+                          <a
+                            href={targetUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="p-1.5 rounded-lg bg-slate-900 text-slate-300 hover:text-emerald-400 border border-slate-800 inline-block"
+                            title="View Public Presentation Page"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                          </a>
+                        )}
+
+                        <button
+                          onClick={() => {
+                            setEditingPresentation(p);
+                            setEditTitle(p.title);
+                            setEditDate(p.presentationDate);
+                            setEditAuthors(p.authors ? p.authors.join(', ') : '');
+                            setEditChangeSummary(p.changeSummary || '');
+                            setEditDescription(p.description || '');
+                          }}
+                          className="p-1.5 rounded-lg bg-slate-900 text-slate-300 hover:text-teal-400 border border-slate-800 inline-block"
+                          title="Edit Metadata"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+
+                        <button
+                          onClick={() => handleTogglePublish(p)}
+                          className={`px-2 py-1 rounded-lg border text-[10px] ${
+                            isPublished
+                              ? 'bg-slate-900 text-amber-300 border-slate-800 hover:border-amber-500/40'
+                              : 'bg-emerald-950/80 text-emerald-300 border-emerald-800/80 hover:bg-emerald-900'
+                          }`}
+                          title={isPublished ? 'Unpublish to Draft' : 'Publish to Public Site'}
+                        >
+                          {isPublished ? 'Unpublish' : 'Publish'}
+                        </button>
+
+                        {!isArchived && (
+                          <button
+                            onClick={() => handleArchive(p)}
+                            className="p-1.5 rounded-lg bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800 inline-block"
+                            title="Archive"
+                          >
+                            <Archive className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+
+                        <button
+                          onClick={() => handleDeletePresentation(p)}
+                          className="p-1.5 rounded-lg bg-rose-950/40 text-rose-400 hover:text-rose-200 border border-rose-900/50 inline-block"
+                          title="Delete Presentation"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Edit Metadata Modal */}
       {editingPresentation && (
@@ -451,7 +614,7 @@ export const AdminPage: React.FC = () => {
               <div>
                 <label className="block text-slate-300 font-semibold mb-1">Presentation Date</label>
                 <input
-                  type="text"
+                  type="date"
                   value={editDate}
                   onChange={(e) => setEditDate(e.target.value)}
                   required
@@ -460,7 +623,7 @@ export const AdminPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Authors (comma separated)</label>
+                <label className="block text-slate-300 font-semibold mb-1">Authors (comma-separated)</label>
                 <input
                   type="text"
                   value={editAuthors}
@@ -470,7 +633,7 @@ export const AdminPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Change Summary / Notes</label>
+                <label className="block text-slate-300 font-semibold mb-1">Change Summary</label>
                 <input
                   type="text"
                   value={editChangeSummary}
@@ -480,26 +643,26 @@ export const AdminPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Description</label>
+                <label className="block text-slate-300 font-semibold mb-1">Description / Abstract</label>
                 <textarea
-                  rows={2}
                   value={editDescription}
                   onChange={(e) => setEditDescription(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500 font-sans"
+                  rows={3}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500"
                 />
               </div>
 
-              <div className="flex justify-end space-x-2 pt-2 border-t border-slate-800">
+              <div className="flex justify-end space-x-2 pt-3 border-t border-slate-800">
                 <button
                   type="button"
                   onClick={() => setEditingPresentation(null)}
-                  className="px-3.5 py-1.5 rounded-lg bg-slate-900 text-slate-400 border border-slate-800"
+                  className="px-4 py-2 rounded-lg bg-slate-900 text-slate-400 border border-slate-800"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-bold"
+                  className="px-4 py-2 rounded-lg bg-emerald-500 text-slate-950 font-bold hover:bg-emerald-400"
                 >
                   Save Changes
                 </button>
@@ -509,15 +672,17 @@ export const AdminPage: React.FC = () => {
         </div>
       )}
 
-      {/* Upload Modal */}
+      {/* Deliverable & Presentation Upload Modal */}
       <AdminUploadModal
         isOpen={uploadModalOpen}
+        initialTarget={uploadModalTarget}
         onClose={() => setUploadModalOpen(false)}
         onSuccess={() => {
-          setStatusMessage('New presentation version uploaded and registered.');
+          setStatusMessage('Upload completed successfully. Item is now live in the repository.');
           loadAdminData();
         }}
       />
     </div>
   );
 };
+export default AdminPage;

@@ -14,6 +14,7 @@ import {
   K8sJobExecutionRecord,
   ExperimentRecord,
 } from '../types';
+import { DEFAULT_PROJECT_RESOURCES } from '../data/resourcesData';
 
 export const BACKEND_URL =
   ((import.meta as any).env?.VITE_API_URL as string)?.replace(/\/api\/?$/, '') ||
@@ -133,24 +134,24 @@ const DEFAULT_TEAM: TeamMember[] = [
   {
     id: 'team-1',
     name: 'Yuvika Nagpal',
-    role: 'Simulation / Data / Workload Modelling',
-    bio: 'Leads the discrete-event cloud simulator development, multi-region grid carbon-intensity trace generation, and synthetic/empirical batch workload generators.',
+    role: 'Backend & System Integration',
+    bio: 'Worked on backend development, live Electricity Maps API integration, carbon-data flow, frontend-backend integration, and integration of the major system components.',
     avatarUrl: '',
     displayOrder: 1,
   },
   {
     id: 'team-2',
-    name: 'Kumkum Gupta',
-    role: 'Scheduling Algorithms / Uncertainty / Risk Calibration',
-    bio: 'Responsible for baseline scheduling algorithms (Immediate, EDF, Cost-Aware), horizon-dependent forecast error modeling, and deadline-risk calibration engine.',
+    name: 'Aaneya Sabharwal',
+    role: 'Frontend & User Interface',
+    bio: 'Worked on frontend development, workload input interface, and carbon forecast and scheduling result visualization.',
     avatarUrl: '',
     displayOrder: 2,
   },
   {
     id: 'team-3',
-    name: 'Aaneya Sabharwal',
-    role: 'Backend / Dashboard / Deployment / Integration',
-    bio: 'Focuses on the FastAPI scheduling backend, containerized Kubernetes batch execution connectors, interactive experiment dashboard, and deployment architecture.',
+    name: 'Kumkum Gupta',
+    role: 'Scheduling & Uncertainty Analysis',
+    bio: 'Worked on scheduling policies, candidate execution-window evaluation, uncertainty analysis, deadline-violation risk, and policy comparison.',
     avatarUrl: '',
     displayOrder: 3,
   },
@@ -477,23 +478,63 @@ export const api = {
 
   // Resources
   async getResources(category?: string): Promise<ApiResponse<Resource[]>> {
+    const staticResources: Resource[] = DEFAULT_PROJECT_RESOURCES.map((d) => ({
+      id: d.id,
+      title: d.title,
+      description: d.description,
+      category: d.category,
+      type: d.type,
+      format: d.format,
+      fileName: d.format === 'pdf' ? `${d.title}.pdf` : undefined,
+      fileUrl: d.url.startsWith('http') || d.url.startsWith('/') ? d.url : resolveFileUrl(d.url),
+      date: d.date,
+      version: d.version,
+      fileSize: d.fileSize ? parseInt(d.fileSize.replace(/[^0-9]/g, ''), 10) * 1024 : undefined,
+      actionType: d.actionType,
+      isExternal: d.isExternal,
+      badge: d.badge,
+      authors: d.authors,
+      isPublished: true,
+      createdAt: new Date().toISOString(),
+    }));
+
+    const filterCategory = (items: Resource[]) => {
+      if (!category || category === 'all') return items;
+      const normCat = category.toLowerCase().replace(/[^a-z]/g, '');
+      return items.filter(
+        (r) =>
+          r.category.toLowerCase().replace(/[^a-z]/g, '') === normCat ||
+          (r.type && r.type.toLowerCase().replace(/[^a-z]/g, '') === normCat)
+      );
+    };
+
     try {
       const query = category && category !== 'all' ? `?category=${encodeURIComponent(category)}` : '';
       const res = await fetch(`${API_BASE}/resources${query}`, { headers: getHeaders() });
       if (res.ok) {
         const json = await res.json();
-        if (json.success && Array.isArray(json.data)) {
+        if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+          const apiItems: Resource[] = json.data.map((r: Resource) => ({
+            ...r,
+            fileUrl: resolveFileUrl(r.fileUrl, r.filePath, r.fileName),
+          }));
+          const existingIds = new Set(apiItems.map((i) => i.id));
+          const existingTitles = new Set(apiItems.map((i) => i.title.toLowerCase().trim()));
+          const combined = [
+            ...apiItems,
+            ...staticResources.filter(
+              (s) => !existingIds.has(s.id) && !existingTitles.has(s.title.toLowerCase().trim())
+            ),
+          ];
           return {
-            ...json,
-            data: json.data.map((r: Resource) => ({
-              ...r,
-              fileUrl: resolveFileUrl(r.fileUrl, r.filePath, r.fileName),
-            })),
+            success: true,
+            data: filterCategory(combined),
           };
         }
       }
     } catch {}
-    return { success: true, data: [] };
+
+    return { success: true, data: filterCategory(staticResources) };
   },
 
   async getAllResourcesAdmin(): Promise<ApiResponse<Resource[]>> {

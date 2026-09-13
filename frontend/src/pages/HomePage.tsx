@@ -459,27 +459,27 @@ export const HomePage: React.FC = () => {
             <div className="p-5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2">
               <h3 className="font-bold text-white text-base">Yuvika Nagpal</h3>
               <div className="text-xs text-emerald-400 font-mono">Roll: 1024030141</div>
-              <div className="text-xs text-slate-300 font-mono">Simulation / Data / Workload Modelling</div>
+              <div className="text-xs text-slate-300 font-mono">Backend & System Integration</div>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Grid carbon intensity service, Electricity Maps API integration, calibrated 24h ISO traces, and workload constraint profiling.
-              </p>
-            </div>
-
-            <div className="p-5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2">
-              <h3 className="font-bold text-white text-base">Kumkum Gupta</h3>
-              <div className="text-xs text-emerald-400 font-mono">Roll: 1024030144</div>
-              <div className="text-xs text-slate-300 font-mono">Scheduling Algorithms / Uncertainty / Risk Calibration</div>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                5-policy benchmark engine (Immediate, EDF, Deterministic, Baseline, CarbonRoute) and horizon-dependent tail risk probability modeling.
+                Worked on backend development, live Electricity Maps API integration, carbon-data flow, frontend-backend integration, and integration of the major system components.
               </p>
             </div>
 
             <div className="p-5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2">
               <h3 className="font-bold text-white text-base">Aaneya Sabharwal</h3>
               <div className="text-xs text-emerald-400 font-mono">Roll: 1024030147</div>
-              <div className="text-xs text-slate-300 font-mono">Backend / Kubernetes Connector / Web UI / Deployment</div>
+              <div className="text-xs text-slate-300 font-mono">Frontend & User Interface</div>
               <p className="text-xs text-slate-400 leading-relaxed">
-                REST API controllers, Kubernetes batch/v1 manifest generator, resilient local container runner, and interactive prototype UI.
+                Worked on frontend development, workload input interface, and carbon forecast and scheduling result visualization.
+              </p>
+            </div>
+
+            <div className="p-5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2">
+              <h3 className="font-bold text-white text-base">Kumkum Gupta</h3>
+              <div className="text-xs text-emerald-400 font-mono">Roll: 1024030144</div>
+              <div className="text-xs text-slate-300 font-mono">Scheduling & Uncertainty Analysis</div>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Worked on scheduling policies, candidate execution-window evaluation, uncertainty analysis, deadline-violation risk, and policy comparison.
               </p>
             </div>
           </div>

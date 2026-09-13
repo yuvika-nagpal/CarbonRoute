@@ -5,35 +5,35 @@ export const TeamPage: React.FC = () => {
   const team = [
     {
       name: 'Yuvika Nagpal',
-      role: 'Simulation / Data / Workload Modelling',
-      bio: 'Responsible for discrete-event simulator architecture, electricity grid carbon-intensity trace ingestion and preprocessing, and realistic synthetic batch workload models.',
+      role: 'Backend & System Integration',
+      bio: 'Worked on backend development, live Electricity Maps API integration, carbon-data flow, frontend-backend integration, and integration of the major system components.',
       focus: [
-        'Discrete-Event Cloud Simulation Core',
-        'Multi-Region Carbon Intensity & Tariff Traces',
-        'Synthetic Batch Workload Generators',
-        'Simulated Resource Contention Modeling',
-      ],
-    },
-    {
-      name: 'Kumkum Gupta',
-      role: 'Scheduling Algorithms / Uncertainty / Risk Calibration',
-      bio: 'Responsible for baseline scheduling algorithms (Immediate, EDF, Cost-Aware), forecast error distribution modeling, deadline-violation risk estimation, and probability calibration.',
-      focus: [
-        'Baseline Schedulers Suite & Oracle Reference',
-        'Forecast Uncertainty & Error Modeling',
-        'P(deadline violation | decision) Optimization',
-        'Brier Score & Reliability Calibration',
+        'Backend development & API services',
+        'Live Electricity Maps API integration',
+        'Carbon-data flow architecture',
+        'Frontend-backend integration & major components',
       ],
     },
     {
       name: 'Aaneya Sabharwal',
-      role: 'Backend / Dashboard / Deployment / Integration',
-      bio: 'Responsible for the FastAPI scheduling service backend, containerized Kubernetes batch execution connectors, interactive experiment dashboard, and production deployment architecture.',
+      role: 'Frontend & User Interface',
+      bio: 'Worked on frontend development, workload input interface, and carbon forecast and scheduling result visualization.',
       focus: [
-        'FastAPI REST Microservice & OpenAPI Spec',
-        'Kubernetes Batch Job Connector & Runner',
-        'Interactive Visual Analytics Dashboard',
-        'Platform Deployment & Immutable Archiving',
+        'Frontend application development',
+        'Workload input interface',
+        'Carbon forecast & scheduling result visualization',
+        'Interactive UI components & visual layouts',
+      ],
+    },
+    {
+      name: 'Kumkum Gupta',
+      role: 'Scheduling & Uncertainty Analysis',
+      bio: 'Worked on scheduling policies, candidate execution-window evaluation, uncertainty analysis, deadline-violation risk, and policy comparison.',
+      focus: [
+        'Scheduling policies implementation',
+        'Candidate execution-window evaluation',
+        'Uncertainty analysis modeling',
+        'Deadline-violation risk & policy comparison',
       ],
     },
   ];

@@ -46,15 +46,23 @@ export type PresentationVersion = PresentationItem;
 export interface Resource {
   id: string;
   title: string;
-  category: 'presentation' | 'report' | 'dataset' | 'diagram' | 'documentation';
+  category: string;
   description: string;
-  fileName: string;
-  filePath: string;
-  fileSize: number;
-  mimeType: string;
-  fileUrl: string;
-  isPublished: boolean;
-  createdAt: string;
+  fileName?: string;
+  filePath?: string;
+  fileSize?: number;
+  mimeType?: string;
+  fileUrl?: string;
+  isPublished?: boolean;
+  createdAt?: string;
+  type?: string;
+  format?: string;
+  date?: string;
+  version?: string;
+  actionType?: 'view' | 'download' | 'external';
+  isExternal?: boolean;
+  badge?: string;
+  authors?: string;
 }
 
 export interface TeamMember {

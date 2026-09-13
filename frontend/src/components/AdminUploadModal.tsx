@@ -11,6 +11,7 @@ import {
   Eye,
   Send,
   Save,
+  FolderDown,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { DeliverableType, PresentationStatus } from '../types';
@@ -19,17 +20,21 @@ interface AdminUploadModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  initialTarget?: 'presentation' | 'resource';
 }
 
 export const AdminUploadModal: React.FC<AdminUploadModalProps> = ({
   isOpen,
   onClose,
   onSuccess,
+  initialTarget = 'presentation',
 }) => {
+  const [uploadTarget, setUploadTarget] = useState<'presentation' | 'resource'>(initialTarget);
   const [file, setFile] = useState<File | null>(null);
   const [dragActive, setDragActive] = useState<boolean>(false);
   const [title, setTitle] = useState<string>('');
   const [deliverableType, setDeliverableType] = useState<DeliverableType>('planning');
+  const [resourceCategory, setResourceCategory] = useState<string>('Planning');
   const [versionTag, setVersionTag] = useState<string>('v2');
   const [presentationDate, setPresentationDate] = useState<string>(
     new Date().toISOString().split('T')[0]
@@ -81,11 +86,11 @@ export const AdminUploadModal: React.FC<AdminUploadModalProps> = ({
 
   const executeUpload = async (status: PresentationStatus) => {
     if (!file) {
-      setError('Please select or drop a presentation file (PDF/PPT/PPTX).');
+      setError('Please select or drop a file to upload.');
       return;
     }
-    if (!title || !versionTag || !presentationDate) {
-      setError('Title, Version, and Presentation Date are required fields.');
+    if (!title.trim()) {
+      setError('Title is required.');
       return;
     }
 
@@ -93,23 +98,46 @@ export const AdminUploadModal: React.FC<AdminUploadModalProps> = ({
     setError(null);
 
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('title', title);
-      formData.append('deliverableType', deliverableType);
-      formData.append('versionTag', versionTag.toLowerCase().trim());
-      formData.append('presentationDate', presentationDate);
-      formData.append('authors', authors);
-      formData.append('description', description);
-      formData.append('changeSummary', changeSummary);
-      formData.append('status', status);
+      if (uploadTarget === 'resource') {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('title', title.trim());
+        formData.append('category', resourceCategory);
+        formData.append('description', description);
+        formData.append('isPublished', 'true');
 
-      const res = await api.uploadPresentationVersion(formData);
-      if (res.success) {
-        onSuccess();
-        onClose();
+        const res = await api.uploadResource(formData);
+        if (res.success) {
+          onSuccess();
+          onClose();
+        } else {
+          setError(res.message || 'Failed to upload resource deliverable.');
+        }
       } else {
-        setError(res.message || 'Failed to upload presentation.');
+        if (!versionTag || !presentationDate) {
+          setError('Version and Presentation Date are required for presentations.');
+          setLoading(false);
+          return;
+        }
+
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('title', title);
+        formData.append('deliverableType', deliverableType);
+        formData.append('versionTag', versionTag.toLowerCase().trim());
+        formData.append('presentationDate', presentationDate);
+        formData.append('authors', authors);
+        formData.append('description', description);
+        formData.append('changeSummary', changeSummary);
+        formData.append('status', status);
+
+        const res = await api.uploadPresentationVersion(formData);
+        if (res.success) {
+          onSuccess();
+          onClose();
+        } else {
+          setError(res.message || 'Failed to upload presentation.');
+        }
       }
     } catch (err: any) {
       setError(err.message || 'Network error occurred during upload.');
@@ -127,10 +155,10 @@ export const AdminUploadModal: React.FC<AdminUploadModalProps> = ({
             <div>
               <h3 className="text-lg font-bold text-white font-mono flex items-center space-x-2">
                 <UploadCloud className="w-5 h-5 text-emerald-400" />
-                <span>Upload &amp; Register Presentation Deliverable</span>
+                <span>Upload Deliverable to Repository</span>
               </h3>
               <p className="text-xs text-slate-400 mt-0.5 font-mono">
-                Permanent versioning with immutable storage retention.
+                Centralized file storage with immediate availability in Resources and Presentations.
               </p>
             </div>
             <button
@@ -141,14 +169,53 @@ export const AdminUploadModal: React.FC<AdminUploadModalProps> = ({
             </button>
           </div>
 
-          {/* Form */}
-          <div className="p-6 space-y-4 text-xs">
+          <div className="p-6 space-y-5 text-xs font-mono">
             {error && (
-              <div className="p-3.5 rounded-lg bg-rose-950/50 border border-rose-800/80 text-rose-300 flex items-start space-x-2.5 font-mono">
+              <div className="p-3.5 rounded-xl bg-rose-950/60 border border-rose-800/80 text-rose-300 flex items-start space-x-2">
                 <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
                 <span>{error}</span>
               </div>
             )}
+
+            {/* Target Selector */}
+            <div className="space-y-1.5">
+              <label className="block text-slate-300 font-semibold font-mono">
+                Upload Target Repository
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setUploadTarget('resource')}
+                  className={`p-3 rounded-xl border text-left flex items-center space-x-2.5 transition-all ${
+                    uploadTarget === 'resource'
+                      ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-300 font-bold'
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <FolderDown className="w-4 h-4 text-emerald-400" />
+                  <div>
+                    <div className="text-xs">Project Deliverables (Resources)</div>
+                    <div className="text-[10px] text-slate-500 font-normal">Reports, specs, data, testing, etc.</div>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setUploadTarget('presentation')}
+                  className={`p-3 rounded-xl border text-left flex items-center space-x-2.5 transition-all ${
+                    uploadTarget === 'presentation'
+                      ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-300 font-bold'
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <FileText className="w-4 h-4 text-emerald-400" />
+                  <div>
+                    <div className="text-xs">Presentation Archive</div>
+                    <div className="text-[10px] text-slate-500 font-normal">Planning, mid-sem, final decks</div>
+                  </div>
+                </button>
+              </div>
+            </div>
 
             {/* Drag & Drop File Zone */}
             <div
@@ -170,7 +237,7 @@ export const AdminUploadModal: React.FC<AdminUploadModalProps> = ({
                 type="file"
                 onChange={handleFileChange}
                 className="hidden"
-                accept=".pdf,.ppt,.pptx,.key,.zip"
+                accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.zip,.json,.png,.jpg,.jpeg"
               />
               {file ? (
                 <div className="space-y-1">
@@ -185,118 +252,134 @@ export const AdminUploadModal: React.FC<AdminUploadModalProps> = ({
                 <div className="space-y-1">
                   <UploadCloud className="w-8 h-8 text-slate-500 mx-auto" />
                   <div className="font-medium text-slate-200 font-mono">
-                    Drag and drop PPT/PDF file or <span className="text-emerald-400 underline">browse</span>
+                    Drag &amp; drop deliverable file or <span className="text-emerald-400 underline">browse</span>
                   </div>
                   <div className="text-[11px] text-slate-500 font-mono">
-                    Supports PDF, PPT, PPTX (Max 50MB)
+                    Supports PDF, PPT, PPTX, DOCX, XLSX, ZIP, JSON (Max 50MB)
                   </div>
                 </div>
               )}
             </div>
 
-            {/* Metadata Fields */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1 font-mono">
-                  Presentation Title *
-                </label>
-                <input
-                  type="text"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="e.g. Planning Presentation V2"
-                  required
-                  className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1 font-mono">
-                  Deliverable Type *
-                </label>
-                <select
-                  value={deliverableType}
-                  onChange={(e) => setDeliverableType(e.target.value as DeliverableType)}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500 font-mono"
-                >
-                  <option value="planning">Planning Presentation</option>
-                  <option value="software_grid">Software Grid</option>
-                  <option value="midterm">Mid-Sem Presentation</option>
-                  <option value="final">Final Presentation</option>
-                  <option value="other">Other</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1 font-mono">
-                  Version * (e.g. v1, v2)
-                </label>
-                <input
-                  type="text"
-                  value={versionTag}
-                  onChange={(e) => setVersionTag(e.target.value)}
-                  placeholder="v2"
-                  required
-                  className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white font-mono placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1 font-mono">
-                  Presentation Date *
-                </label>
-                <input
-                  type="date"
-                  value={presentationDate}
-                  onChange={(e) => setPresentationDate(e.target.value)}
-                  required
-                  className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500 font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1 font-mono">
-                  Authors
-                </label>
-                <input
-                  type="text"
-                  value={authors}
-                  onChange={(e) => setAuthors(e.target.value)}
-                  placeholder="Yuvika Nagpal, Kumkum Gupta, Aaneya Sabharwal"
-                  className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono text-[11px]"
-                />
-              </div>
-            </div>
-
+            {/* Title Field */}
             <div>
               <label className="block text-slate-300 font-semibold mb-1 font-mono">
-                Change Summary / Release Notes
+                Deliverable Title *
               </label>
               <input
                 type="text"
-                value={changeSummary}
-                onChange={(e) => setChangeSummary(e.target.value)}
-                placeholder="e.g. Refined uncertainty modeling formulation and benchmark metrics"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder={uploadTarget === 'resource' ? 'e.g. Test Plan & Evaluation Report' : 'e.g. Planning Presentation V2'}
+                required
                 className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono"
               />
             </div>
 
+            {/* Resource-Specific Fields */}
+            {uploadTarget === 'resource' ? (
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1 font-mono">
+                  Category *
+                </label>
+                <select
+                  value={resourceCategory}
+                  onChange={(e) => setResourceCategory(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500 font-mono"
+                >
+                  <option value="Planning">Planning</option>
+                  <option value="Research">Research</option>
+                  <option value="Documentation">Documentation</option>
+                  <option value="Presentations">Presentations</option>
+                  <option value="Design">Design</option>
+                  <option value="Development">Development</option>
+                  <option value="Testing">Testing</option>
+                  <option value="Dataset / ML">Dataset / ML</option>
+                  <option value="Reports">Reports</option>
+                  <option value="Prototype">Prototype</option>
+                  <option value="Final Deliverables">Final Deliverables</option>
+                </select>
+              </div>
+            ) : (
+              /* Presentation-Specific Fields */
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1 font-mono">
+                      Deliverable Type *
+                    </label>
+                    <select
+                      value={deliverableType}
+                      onChange={(e) => setDeliverableType(e.target.value as DeliverableType)}
+                      className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500 font-mono"
+                    >
+                      <option value="planning">Planning Presentation</option>
+                      <option value="software_grid">Software Grid</option>
+                      <option value="midterm">Mid-Sem Presentation</option>
+                      <option value="final">Final Presentation</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1 font-mono">
+                      Version * (e.g. v1, v2)
+                    </label>
+                    <input
+                      type="text"
+                      value={versionTag}
+                      onChange={(e) => setVersionTag(e.target.value)}
+                      placeholder="v2"
+                      required
+                      className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white font-mono placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1 font-mono">
+                      Presentation Date *
+                    </label>
+                    <input
+                      type="date"
+                      value={presentationDate}
+                      onChange={(e) => setPresentationDate(e.target.value)}
+                      required
+                      className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white font-mono focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1 font-mono">
+                      Authors
+                    </label>
+                    <input
+                      type="text"
+                      value={authors}
+                      onChange={(e) => setAuthors(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white font-mono focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Description Field */}
             <div>
               <label className="block text-slate-300 font-semibold mb-1 font-mono">
-                Description / Abstract
+                Short Description / Abstract
               </label>
               <textarea
-                rows={2}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Short summary of the presentation deliverable..."
-                className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-sans"
+                rows={2}
+                placeholder="Brief summary of this deliverable for the library..."
+                className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono"
               />
             </div>
 
-            {/* Workflow Buttons: Save Draft, Preview, Publish */}
+            {/* Actions Bar */}
             <div className="pt-4 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3">
               <button
                 type="button"
@@ -307,38 +390,30 @@ export const AdminUploadModal: React.FC<AdminUploadModalProps> = ({
               </button>
 
               <div className="flex items-center space-x-2">
-                <button
-                  type="button"
-                  onClick={() => setPreviewModalOpen(true)}
-                  disabled={!title || !file}
-                  className="px-4 py-2 rounded-lg bg-slate-800 text-slate-200 hover:text-white border border-slate-700 font-mono font-semibold flex items-center space-x-1.5 disabled:opacity-40"
-                >
-                  <Eye className="w-3.5 h-3.5 text-teal-400" />
-                  <span>Preview</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => executeUpload('draft')}
-                  disabled={loading || !file}
-                  className="px-4 py-2 rounded-lg bg-slate-800 text-amber-300 hover:bg-slate-700 border border-slate-700 font-mono font-semibold flex items-center space-x-1.5 disabled:opacity-40"
-                >
-                  <Save className="w-3.5 h-3.5" />
-                  <span>Save Draft</span>
-                </button>
+                {uploadTarget === 'presentation' && (
+                  <button
+                    type="button"
+                    onClick={() => setPreviewModalOpen(true)}
+                    disabled={!title || !file}
+                    className="px-4 py-2 rounded-lg bg-slate-800 text-slate-200 hover:text-white border border-slate-700 font-mono font-semibold flex items-center space-x-1.5 disabled:opacity-40"
+                  >
+                    <Eye className="w-3.5 h-3.5 text-teal-400" />
+                    <span>Preview</span>
+                  </button>
+                )}
 
                 <button
                   type="button"
                   onClick={() => executeUpload('published')}
-                  disabled={loading || !file}
+                  disabled={loading || !file || !title}
                   className="px-5 py-2 rounded-lg bg-emerald-500 text-slate-950 font-bold hover:bg-emerald-400 transition-colors font-mono flex items-center space-x-1.5 disabled:opacity-40 shadow-sm"
                 >
                   {loading ? (
-                    <span>Publishing...</span>
+                    <span>Uploading...</span>
                   ) : (
                     <>
                       <Send className="w-3.5 h-3.5" />
-                      <span>Publish</span>
+                      <span>Upload to Repository</span>
                     </>
                   )}
                 </button>
@@ -348,8 +423,8 @@ export const AdminUploadModal: React.FC<AdminUploadModalProps> = ({
         </div>
       </div>
 
-      {/* Interactive Preview Modal */}
-      {previewModalOpen && (
+      {/* Presentation Preview Modal */}
+      {previewModalOpen && uploadTarget === 'presentation' && (
         <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md">
           <div className="glass-card rounded-2xl border border-slate-700 w-full max-w-xl p-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -373,13 +448,7 @@ export const AdminUploadModal: React.FC<AdminUploadModalProps> = ({
                 <div><span className="text-slate-500">Date:</span> <span className="text-slate-300">{presentationDate}</span></div>
                 <div><span className="text-slate-500">Authors:</span> <span className="text-slate-300">{authors}</span></div>
                 <div><span className="text-slate-500">File:</span> <span className="text-slate-300">{file?.name} ({Math.round((file?.size || 0) / 1024)} KB)</span></div>
-                {changeSummary && <div><span className="text-slate-500">Change Summary:</span> <span className="text-slate-300">{changeSummary}</span></div>}
               </div>
-
-              <p className="text-[11px] text-slate-400">
-                Upon publishing, this presentation will be assigned a permanent URL (<code>/presentation/{versionTag.toLowerCase()}</code>).
-                All prior versions (including Planning V1) will remain preserved in the permanent repository.
-              </p>
             </div>
 
             <div className="flex justify-end space-x-3 pt-3 border-t border-slate-800">
@@ -388,7 +457,7 @@ export const AdminUploadModal: React.FC<AdminUploadModalProps> = ({
                 onClick={() => setPreviewModalOpen(false)}
                 className="px-4 py-2 rounded-lg bg-slate-900 text-slate-400 border border-slate-800 font-mono text-xs"
               >
-                Back to Edit
+                Back
               </button>
               <button
                 type="button"
@@ -398,7 +467,7 @@ export const AdminUploadModal: React.FC<AdminUploadModalProps> = ({
                 }}
                 className="px-5 py-2 rounded-lg bg-emerald-500 text-slate-950 font-bold font-mono text-xs hover:bg-emerald-400"
               >
-                Confirm &amp; Publish
+                Confirm &amp; Upload
               </button>
             </div>
           </div>
@@ -407,3 +476,4 @@ export const AdminUploadModal: React.FC<AdminUploadModalProps> = ({
     </>
   );
 };
+export default AdminUploadModal;
