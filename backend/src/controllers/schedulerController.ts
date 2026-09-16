@@ -31,22 +31,23 @@ export const simulateFeasibilityDecision = async (req: Request, res: Response) =
       for (let w = h; w < h + durationHours; w++) {
         const pt = forecastData.hourlyProfile[w % forecastData.hourlyProfile.length];
         sumCarbon += pt.predictedCarbon;
-        sumStd += pt.stdDev ?? 20;
+        sumStd += pt.stdDev;
       }
       const avgCarbon = Math.round(sumCarbon / durationHours);
+      const avgStd = Math.round(sumStd / durationHours);
 
-      const riskLow = UncertaintyService.calculateDeadlineRisk(h, durationHours, deadlineHours, 0.2);
-      const riskHigh = UncertaintyService.calculateDeadlineRisk(h, durationHours, deadlineHours, 0.8);
+      const riskLow = UncertaintyService.calculateDeadlineRisk(h, durationHours, deadlineHours, avgStd, 0.6);
+      const riskHigh = UncertaintyService.calculateDeadlineRisk(h, durationHours, deadlineHours, avgStd, 2.5);
 
       timeSlots.push({
         hour: h,
         predictedCarbon: avgCarbon,
         uncertaintyLow: {
-          stdDev: Math.round(riskLow.effectiveStdDev ?? 0),
+          stdDev: Math.round(riskLow.effectiveStdDev),
           violationRisk: riskLow.violationRisk,
         },
         uncertaintyHigh: {
-          stdDev: Math.round(riskHigh.effectiveStdDev ?? 0),
+          stdDev: Math.round(riskHigh.effectiveStdDev),
           violationRisk: riskHigh.violationRisk,
         },
       });

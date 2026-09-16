@@ -1,7 +1,7 @@
 # CarbonRoute System Architecture Specification
 
 ## 1. Executive Summary
-**CarbonRoute** is a software-based carbon-aware scheduler for batch computing workloads. Rather than treating forecast point predictions as infallible ground truth, CarbonRoute models scheduling decisions under uncertainty, ensuring deterministic deadline feasibility while minimizing predicted grid carbon intensity.
+**CarbonRoute** is a software-based, uncertainty-aware carbon-aware scheduler for batch computing workloads. Unlike naive carbon-aware systems that treat forecast point predictions as ground truth, CarbonRoute models forecast error variance and evaluates the calibrated probability of deadline violation before scheduling batch execution.
 
 ---
 
@@ -10,44 +10,53 @@
 ```
 +-------------------------------------------------------------------------+
 |                              DATA LAYER                                 |
-|  - Carbon Data Provider (Electricity Maps API v3 / Benchmark Traces)    |
+|  - Carbon Data Provider (Electricity Maps / National Grid API)          |
 |  - Forecast Carbon Time-Series (gCO2eq/kWh)                             |
-|  - Explicit Calibration State (Live: not_calibrated / Demo: benchmark)  |
-|  - Synthetic Batch Workload Specifications (Duration, Deadline, Tau)    |
+|  - Historical Realised Ground Truth & Missing-Data Filters              |
+|  - Synthetic Batch Workload Traces (Arrival, Duration, Deadline, SLRs)  |
 +-------------------------------------------------------------------------+
                                     |
                                     v
 +-------------------------------------------------------------------------+
 |                      MODELLING & CALIBRATION LAYER                      |
-|  - Carbon Forecast Uncertainty Estimator (Decoupled grid error model)   |
-|  - Workload Runtime Uncertainty Estimator (Decoupled compute duration)  |
-|  - Deadline Slack & Feasibility Evaluator (t_start + duration <= ddl)   |
-|  - Reliability Calibration Roadmap: Brier Score & ECE Scoring           |
+|  - Forecast Error Variance Model: e(t, h) ~ N(mu_h, sigma_h^2)          |
+|  - Deadline Risk Estimator: P(deadline violation | decision d)          |
+|  - Reliability Calibration Engine (Isotonic Regression / Platt Scaling) |
+|  - Verification Scoring: Brier Score & Expected Calibration Error (ECE) |
 +-------------------------------------------------------------------------+
                                     |
                                     v
 +-------------------------------------------------------------------------+
 |                     SCHEDULING & OPTIMIZATION LAYER                     |
-|  - Hard Constraints: t_start >= t_arr, t_start + duration <= t_dead     |
+|  - Hard Constraint Enforcer: t_start >= t_arr, t_start + D <= t_dead   |
 |  - Risk Constraint: P(violation | decision) <= tau                     |
-|  - Objective: min mean_intensity(t_start, duration) in gCO2eq/kWh       |
-|  - 5 Evaluated Policies: Immediate, EDF, Deterministic, Baseline, CR    |
+|  - Soft Objective: min sum_{t} C_pred(t) * Power + lambda * WaitDelay   |
+|  - Baseline Solvers: Immediate, EDF, Cost-Aware, Standard-Carbon, Oracle|
 +-------------------------------------------------------------------------+
                                     |
                                     v
 +-------------------------------------------------------------------------+
 |                        API & INTEGRATION LAYER                          |
-|  - RESTful Scheduling API (`POST /api/prototype/schedule`)              |
-|  - Declarative Kubernetes Manifest Synthesizer (`batch/v1 Job`)         |
-|  - Research Status & Capability Metadata Reporter                       |
+|  - RESTful Scheduling API (`POST /api/v1/schedule`)                     |
+|  - Structured Decision Explanation Service (JSON + Human Rationale)     |
+|  - Health, Telemetry, and JWT Access Control                            |
 +-------------------------------------------------------------------------+
                                     |
                                     v
 +-------------------------------------------------------------------------+
 |                       WORKLOAD EXECUTION LAYER                          |
-|  - Prototype Status: Execution Disabled (Declarative Preview Only)      |
-|  - Output: Declarative Kubernetes Job Manifests with Carbon Annotations |
-|  - Planned Milestone: Live Cluster Dispatch & Physical Energy Telemetry |
+|  - Workload Connector Driver                                            |
+|  - Kubernetes Batch Manifest Controller (`batch/v1 Job`)                |
+|  - Modular Extensibility: Argo Workflows / GitHub Actions Runners       |
+|  - Container Lifecycle & Emissions Audit Tracker                        |
++-------------------------------------------------------------------------+
+                                    |
+                                    v
++-------------------------------------------------------------------------+
+|                     EVALUATION & DASHBOARD LAYER                        |
+|  - Discrete-Time Experiment Simulator                                   |
+|  - Multi-Seed Statistical Benchmark Suite (95% Confidence Intervals)    |
+|  - Interactive Web Analytics & Reliability Diagrams                     |
 +-------------------------------------------------------------------------+
 ```
 
@@ -55,23 +64,16 @@
 
 ## 3. Decoupling & Execution Boundary Principles
 
-1. **Role of Electricity Maps**:
-   - Electricity Maps is the sole provider of live point carbon intensity forecasts ($\text{gCO}_2\text{eq/kWh}$).
-   - Electricity Maps does not supply variance or standard deviation directly. Uncertainty is estimated empirically from historical forecast-vs-realized errors.
-
-2. **Decoupled Uncertainty Domains**:
-   - **Carbon Forecast Uncertainty ($\sigma_{\text{carbon}}$):** Affects the grid carbon intensity objective.
-   - **Workload Runtime Uncertainty ($\sigma_{\text{runtime}}$):** Affects completion deadline compliance.
-   - Carbon forecast uncertainty is strictly decoupled from compute runtime: carbon variance does not affect code execution speed.
-
-3. **Role of Kubernetes**:
-   - Kubernetes is the downstream **workload execution and resource management engine** (`batch/v1 Job`).
-   - In the current prototype, direct execution is disabled. CarbonRoute synthesizes declarative manifests ready for GitOps cluster deployment (`kubectl apply -f manifest.yaml`).
+1. **Role of Kubernetes**:
+   - Kubernetes is exclusively the **workload execution and resource management engine** (`batch/v1 Job`).
    - Kubernetes does *not* provide carbon intensity data.
    - Kubernetes does *not* solve the carbon-risk scheduling problem.
 
-4. **Role of CarbonRoute Solver**:
+2. **Role of CarbonRoute Solver**:
    - Operates as an independent microservice.
    - Ingests regional grid signals and workload requirements.
-   - Evaluates continuous execution windows using the user's declared duration.
-   - Outputs a verified optimal dispatch timestamp $t_{\text{start}}$ alongside mathematical justification and declarative manifests.
+   - Outputs a verified optimal dispatch timestamp $t_{\text{start}}$ alongside mathematical justification.
+
+3. **Storage & Immutability**:
+   - Uploaded presentation files and research deliverables are stored in an S3-compatible object storage layer with SHA-256 integrity checksums.
+   - Every uploaded version is immutable and remains permanently accessible.

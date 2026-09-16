@@ -3,6 +3,7 @@ import {
   Cpu,
   Zap,
   Activity,
+  Play,
   Server,
   BarChart3,
   Sliders,
@@ -59,14 +60,20 @@ export const PrototypePage: React.FC = () => {
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [candidateFilter, setCandidateFilter] = useState<'all' | 'feasible' | 'rejected'>('all');
 
-  // 3. Kubernetes Manifest Preview State
+  // 3. Kubernetes Execution State
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [executionRecord, setExecutionRecord] = useState<K8sJobExecutionRecord | null>(null);
+  const [dispatching, setDispatching] = useState<boolean>(false);
+  const [clusterHealth, setClusterHealth] = useState<{ isAvailable: boolean; message: string } | null>(null);
+
+  // 4. Kubernetes Manifest Inspector State
+  const [showManifestModal, setShowManifestModal] = useState<boolean>(false);
   const [manifestData, setManifestData] = useState<any>(null);
-  const [manifestYaml, setManifestYaml] = useState<string>('');
   const [manifestLoading, setManifestLoading] = useState<boolean>(false);
   const [manifestCopied, setManifestCopied] = useState<boolean>(false);
-  const [showManifestModal, setShowManifestModal] = useState<boolean>(false);
-  const [clusterHealth, setClusterHealth] = useState<{ isAvailable: boolean; message: string } | null>(null);
+
+  // Auto-scroll logs
+  const terminalLogsRef = useRef<HTMLDivElement>(null);
 
   // Load Carbon Forecast on Region or Data Source Mode change
   const loadForecast = async (targetRegion: string, mode: 'live' | 'demo' = dataSourceMode) => {
@@ -101,103 +108,6 @@ export const PrototypePage: React.FC = () => {
     checkCluster();
   }, [region, dataSourceMode]);
 
-  // Convert JSON manifest object to formatted YAML string
-  const toYamlString = (obj: any, indent = 0): string => {
-    const pad = '  '.repeat(indent);
-    if (typeof obj !== 'object' || obj === null) {
-      return String(obj);
-    }
-    if (Array.isArray(obj)) {
-      return obj
-        .map((item) => {
-          if (typeof item === 'object' && item !== null) {
-            const inner = toYamlString(item, indent + 1).trimStart();
-            return `${pad}- ${inner}`;
-          }
-          return `${pad}- ${item}`;
-        })
-        .join('\n');
-    }
-    return Object.entries(obj)
-      .map(([key, val]) => {
-        if (typeof val === 'object' && val !== null) {
-          return `${pad}${key}:\n${toYamlString(val, indent + 1)}`;
-        }
-        return `${pad}${key}: ${val}`;
-      })
-      .join('\n');
-  };
-
-  // Load or construct manifest preview
-  const fetchManifestPreview = async (jobId: string, hour: number) => {
-    setManifestLoading(true);
-    try {
-      const res = await api.getJobManifest(jobId, hour);
-      if (res.success && res.data) {
-        setManifestData(res.data.manifest || res.data);
-        setManifestYaml(res.data.yamlPreview || toYamlString(res.data.manifest || res.data));
-        return;
-      }
-    } catch (err) {
-      console.warn('Backend manifest preview fallback:', err);
-    }
-
-    // Client-side fallback constructor
-    const cleanId = (jobName || 'batch-job').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 16);
-    const fallbackObj = {
-      apiVersion: 'batch/v1',
-      kind: 'Job',
-      metadata: {
-        name: `carbonroute-${cleanId}`,
-        namespace: 'carbonroute-jobs',
-        labels: {
-          app: 'carbonroute-workload',
-          'carbonroute.io/job-id': jobId || 'job-preview',
-          'carbonroute.io/scheduled-hour': `T+${hour}`,
-          'carbonroute.io/managed-by': 'carbonroute-scheduler',
-        },
-      },
-      spec: {
-        backoffLimit: 2,
-        ttlSecondsAfterFinished: 3600,
-        template: {
-          metadata: {
-            labels: {
-              app: 'carbonroute-workload',
-              'carbonroute.io/job-id': jobId || 'job-preview',
-            },
-          },
-          spec: {
-            restartPolicy: 'Never',
-            containers: [
-              {
-                name: 'workload-runner',
-                image: commandOrImage.startsWith('python') || commandOrImage.startsWith('tar')
-                  ? 'ghcr.io/carbonroute/workload-synthetic:latest'
-                  : commandOrImage,
-                command: commandOrImage.startsWith('python')
-                  ? ['python', '/app/workload.py', '--epochs', '5']
-                  : ['sh', '-c', commandOrImage],
-                resources: {
-                  requests: { cpu: `${cpu}`, memory: `${memoryMb}Mi` },
-                  limits: { cpu: `${cpu}`, memory: `${memoryMb}Mi` },
-                },
-                env: [
-                  { name: 'CARBONROUTE_JOB_ID', value: jobId || 'job-preview' },
-                  { name: 'CARBONROUTE_SCHEDULED_HOUR', value: String(hour) },
-                  { name: 'CARBONROUTE_REGION', value: region },
-                ],
-              },
-            ],
-          },
-        },
-      },
-    };
-    setManifestData(fallbackObj);
-    setManifestYaml(toYamlString(fallbackObj));
-    setManifestLoading(false);
-  };
-
   // Execute Scheduling Evaluation
   const handleEvaluateSchedule = async (e?: React.FormEvent, overrideMode?: 'live' | 'demo') => {
     if (e) e.preventDefault();
@@ -226,8 +136,6 @@ export const PrototypePage: React.FC = () => {
         if (!forecast || forecast.region !== region || forecast.dataMode !== mode) {
           loadForecast(region, mode);
         }
-        // Automatically fetch manifest preview for recommended start hour
-        fetchManifestPreview(res.data.job.id, res.data.recommendedDecision.selectedStartHour);
       } else {
         setScheduleError(res.message || 'Scheduling evaluation failed.');
       }
@@ -242,6 +150,153 @@ export const PrototypePage: React.FC = () => {
   useEffect(() => {
     handleEvaluateSchedule();
   }, []);
+
+  // Dispatch Job to Kubernetes
+  const handleDispatchJob = async () => {
+    if (!activeJobId || !decision) return;
+    setDispatching(true);
+
+    try {
+      const res = await api.dispatchJob(activeJobId, {
+        predictedCarbon: decision.recommendedDecision.predictedCarbon,
+        simulatedDurationSec: 8,
+      });
+
+      if (res.success && res.data) {
+        setExecutionRecord(res.data);
+      }
+    } catch (err) {
+      console.error('Failed to dispatch job:', err);
+    } finally {
+      setDispatching(false);
+    }
+  };
+
+  // Convert JSON manifest object to formatted YAML string
+  const toYamlString = (obj: any, indent = 0): string => {
+    const pad = '  '.repeat(indent);
+    if (typeof obj !== 'object' || obj === null) {
+      return String(obj);
+    }
+    if (Array.isArray(obj)) {
+      return obj
+        .map((item) => {
+          if (typeof item === 'object' && item !== null) {
+            const inner = toYamlString(item, indent + 1).trimStart();
+            return `${pad}- ${inner}`;
+          }
+          return `${pad}- ${item}`;
+        })
+        .join('\n');
+    }
+    return Object.entries(obj)
+      .map(([key, val]) => {
+        if (typeof val === 'object' && val !== null) {
+          return `${pad}${key}:\n${toYamlString(val, indent + 1)}`;
+        }
+        return `${pad}${key}: ${val}`;
+      })
+      .join('\n');
+  };
+
+  // Open Kubernetes Manifest modal
+  const handleOpenManifest = async () => {
+    setShowManifestModal(true);
+    setManifestLoading(true);
+    setManifestCopied(false);
+    try {
+      const hour = decision?.recommendedDecision.selectedStartHour ?? 0;
+      if (activeJobId) {
+        const res = await api.getJobManifest(activeJobId, hour);
+        if (res.success && res.data) {
+          setManifestData(res.data);
+          return;
+        }
+      }
+
+      // In-client manifest constructor
+      const cleanId = (jobName || 'batch-job').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 16);
+      setManifestData({
+        apiVersion: 'batch/v1',
+        kind: 'Job',
+        metadata: {
+          name: `carbonroute-${cleanId}`,
+          namespace: 'carbonroute-jobs',
+          labels: {
+            app: 'carbonroute-workload',
+            'carbonroute.io/job-id': activeJobId || 'job-preview',
+            'carbonroute.io/scheduled-hour': `T+${hour}`,
+            'carbonroute.io/managed-by': 'carbonroute-scheduler',
+          },
+        },
+        spec: {
+          backoffLimit: 2,
+          ttlSecondsAfterFinished: 3600,
+          template: {
+            metadata: {
+              labels: {
+                app: 'carbonroute-workload',
+                'carbonroute.io/job-id': activeJobId || 'job-preview',
+              },
+            },
+            spec: {
+              restartPolicy: 'Never',
+              containers: [
+                {
+                  name: 'workload-runner',
+                  image: commandOrImage.startsWith('python') || commandOrImage.startsWith('tar')
+                    ? 'ghcr.io/carbonroute/workload-synthetic:latest'
+                    : commandOrImage,
+                  command: commandOrImage.startsWith('python')
+                    ? ['python', '/app/workload.py', '--epochs', '5']
+                    : ['sh', '-c', commandOrImage],
+                  resources: {
+                    requests: { cpu: `${cpu}`, memory: `${memoryMb}Mi` },
+                    limits: { cpu: `${cpu}`, memory: `${memoryMb}Mi` },
+                  },
+                  env: [
+                    { name: 'CARBONROUTE_JOB_ID', value: activeJobId || 'job-preview' },
+                    { name: 'CARBONROUTE_SCHEDULED_HOUR', value: String(hour) },
+                    { name: 'CARBONROUTE_REGION', value: region },
+                  ],
+                },
+              ],
+            },
+          },
+        },
+      });
+    } catch (err) {
+      console.error('Failed to load manifest:', err);
+    } finally {
+      setManifestLoading(false);
+    }
+  };
+
+  // Poll Execution Status if Running
+  useEffect(() => {
+    if (!activeJobId || !executionRecord) return;
+    if (executionRecord.status === 'completed' || executionRecord.status === 'failed') return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await api.getJobStatus(activeJobId);
+        if (res.success && res.data) {
+          setExecutionRecord(res.data);
+        }
+      } catch (err) {
+        console.error('Error polling status:', err);
+      }
+    }, 1200);
+
+    return () => clearInterval(interval);
+  }, [activeJobId, executionRecord?.status]);
+
+  // Auto-scroll logs
+  useEffect(() => {
+    if (terminalLogsRef.current) {
+      terminalLogsRef.current.scrollTop = terminalLogsRef.current.scrollHeight;
+    }
+  }, [executionRecord?.logs]);
 
   // Preset Handlers
   const applyPreset = (
@@ -272,7 +327,7 @@ export const PrototypePage: React.FC = () => {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-mono">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="font-bold">PROTOTYPE SCHEDULING RESEARCH DEMONSTRATOR</span>
+            <span className="font-bold">PROTOTYPE MILESTONE VERTICAL SLICE</span>
             <span className="text-slate-500">&bull;</span>
             <span>Team TriFlux</span>
           </div>
@@ -281,80 +336,27 @@ export const PrototypePage: React.FC = () => {
             <span className="px-2.5 py-1 rounded bg-slate-900 text-slate-300 border border-slate-800">
               API: <strong className="text-emerald-400">Online</strong>
             </span>
-            <span className="px-2.5 py-1 rounded bg-slate-900 text-slate-300 border border-slate-800">
-              Execution: <strong className="text-amber-400">Declarative Preview Only</strong>
+            <span
+              className={`px-2.5 py-1 rounded border ${
+                clusterHealth?.isAvailable
+                  ? 'bg-emerald-950/60 text-emerald-300 border-emerald-800'
+                  : 'bg-amber-950/40 text-amber-300 border-amber-800/60'
+              }`}
+            >
+              K8s Cluster:{' '}
+              <strong>{clusterHealth?.isAvailable ? 'Minikube Live' : 'Sandbox Fallback'}</strong>
             </span>
           </div>
         </div>
 
         <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight font-mono">
-          CarbonRoute Scheduling Decision Prototype
+          CarbonRoute End-to-End Scheduling Prototype
         </h1>
         <p className="text-sm text-slate-400 max-w-4xl leading-relaxed">
-          Demonstrates carbon-aware batch scheduling: from flexible workload specification through live
-          Electricity Maps carbon forecasting, candidate execution window evaluation, and risk-constrained carbon
-          minimization to declarative Kubernetes <code className="text-emerald-400">batch/v1</code> Job manifest synthesis.
+          Demonstrates one complete software vertical slice: from job submission through Electricity Maps carbon
+          forecasting, horizon uncertainty modeling, evaluation of 5 scheduling policies, CarbonRoute
+          deadline-risk decision, to containerized Kubernetes dispatch and results collection.
         </p>
-
-        {/* Current Research Status Card */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-5 rounded-xl bg-slate-900/90 border border-slate-800 text-xs font-mono mt-4">
-          <div className="space-y-2">
-            <div className="flex items-center space-x-2 text-emerald-400 font-bold uppercase tracking-wider">
-              <CheckCircle2 className="w-4 h-4" />
-              <span>Current Prototype Capabilities</span>
-            </div>
-            <ul className="space-y-1.5 text-slate-300">
-              <li className="flex items-center space-x-2">
-                <span className="text-emerald-400 font-bold">✓</span>
-                <span>Live carbon forecast from Electricity Maps (point forecast in gCO2eq/kWh)</span>
-              </li>
-              <li className="flex items-center space-x-2">
-                <span className="text-emerald-400 font-bold">✓</span>
-                <span>Candidate-window scheduling across continuous user-declared duration</span>
-              </li>
-              <li className="flex items-center space-x-2">
-                <span className="text-emerald-400 font-bold">✓</span>
-                <span>Deadline-aware scheduling with deterministic feasibility filtering</span>
-              </li>
-              <li className="flex items-center space-x-2">
-                <span className="text-emerald-400 font-bold">✓</span>
-                <span>CarbonRoute recommendation &amp; 5-policy comparative matrix</span>
-              </li>
-              <li className="flex items-center space-x-2">
-                <span className="text-emerald-400 font-bold">✓</span>
-                <span>Declarative Kubernetes batch/v1 Job manifest synthesis</span>
-              </li>
-            </ul>
-          </div>
-          <div className="space-y-2">
-            <div className="flex items-center space-x-2 text-amber-400 font-bold uppercase tracking-wider">
-              <Clock className="w-4 h-4" />
-              <span>Next Research Milestone</span>
-            </div>
-            <ul className="space-y-1.5 text-slate-400">
-              <li className="flex items-center space-x-2">
-                <span className="text-amber-400 font-bold">○</span>
-                <span>Empirical carbon forecast uncertainty calibration (historical error archive)</span>
-              </li>
-              <li className="flex items-center space-x-2">
-                <span className="text-amber-400 font-bold">○</span>
-                <span>Workload runtime distribution modeling (empirical execution history)</span>
-              </li>
-              <li className="flex items-center space-x-2">
-                <span className="text-amber-400 font-bold">○</span>
-                <span>Brier score, ECE &amp; reliability diagram calibration</span>
-              </li>
-              <li className="flex items-center space-x-2">
-                <span className="text-amber-400 font-bold">○</span>
-                <span>Historical forecast-vs-realized post-hoc validation</span>
-              </li>
-              <li className="flex items-center space-x-2">
-                <span className="text-amber-400 font-bold">○</span>
-                <span>Live Kubernetes cluster dispatch &amp; physical hardware power measurement</span>
-              </li>
-            </ul>
-          </div>
-        </div>
       </div>
 
       {/* 2. SECTION A: JOB SUBMISSION */}
@@ -371,7 +373,7 @@ export const PrototypePage: React.FC = () => {
               </h2>
             </div>
             <p className="text-xs text-slate-400">
-              Provide workload parameters and acceptable deadline risk tolerance &tau;.
+              Provide workload parameters and acceptable deadline risk tolerance $\tau$.
             </p>
           </div>
 
@@ -420,7 +422,7 @@ export const PrototypePage: React.FC = () => {
               className="w-full px-3.5 py-2.5 rounded-lg bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500"
               required
             />
-            <span className="text-[10px] text-slate-500 block">Identifier for manifest &amp; telemetry</span>
+            <span className="text-[10px] text-slate-500 block">Identifier for telemetry &amp; logs</span>
           </div>
 
           {/* Container Image or Command */}
@@ -489,7 +491,7 @@ export const PrototypePage: React.FC = () => {
             </select>
             <span className="text-[10px] text-slate-500 block">
               {dataSourceMode === 'live'
-                ? 'Queries live point forecast from Electricity Maps API v3'
+                ? 'Queries live forecast from Electricity Maps API v3'
                 : 'Uses calibrated research traces for offline reproducibility'}
             </span>
           </div>
@@ -509,7 +511,7 @@ export const PrototypePage: React.FC = () => {
               onChange={(e) => setDurationHours(parseInt(e.target.value, 10))}
               className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-400"
             />
-            <span className="text-[10px] text-slate-500 block">Workload execution block duration</span>
+            <span className="text-[10px] text-slate-500 block">Continuous execution duration</span>
           </div>
 
           {/* Completion Deadline */}
@@ -545,9 +547,7 @@ export const PrototypePage: React.FC = () => {
               onChange={(e) => setRiskTolerance(parseFloat(e.target.value))}
               className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-400"
             />
-            <span className="text-[10px] text-slate-400 block">
-              Deterministic feasibility enforced in current prototype; empirical runtime risk calibration planned for next research milestone.
-            </span>
+            <span className="text-[10px] text-slate-500 block">Max acceptable P(deadline violation) threshold (&tau;)</span>
           </div>
 
           <div className="md:col-span-3 flex justify-end">
@@ -562,7 +562,7 @@ export const PrototypePage: React.FC = () => {
           </div>
         </form>
 
-        {/* Live Error Banner */}
+        {/* Live Error Banner with One-Click Demo Mode Fallback Option */}
         {(scheduleError || forecastError) && (
           <div className="mt-4 p-4 rounded-xl bg-rose-950/50 border border-rose-800/70 space-y-2 text-rose-200 font-mono text-xs">
             <div className="flex items-start space-x-2 font-bold text-rose-400">
@@ -601,11 +601,11 @@ export const PrototypePage: React.FC = () => {
                 </span>
                 <h2 className="text-lg font-bold text-white font-mono flex items-center space-x-2">
                   <Activity className="w-4 h-4 text-emerald-400" />
-                  <span>Carbon Forecast: {forecast.regionName}</span>
+                  <span>Carbon Forecast &amp; Uncertainty Profile: {forecast.regionName}</span>
                 </h2>
               </div>
               <p className="text-xs text-slate-400">
-                24-hour hourly lookahead intensity (gCO2eq/kWh).
+                24-hour hourly lookahead intensity (gCO2eq/kWh) and horizon-dependent forecast variance ($\sigma$).
               </p>
             </div>
 
@@ -623,30 +623,6 @@ export const PrototypePage: React.FC = () => {
             </div>
           </div>
 
-          {/* Scientific Honesty Banner on Carbon Forecast Source & Uncertainty */}
-          <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 text-xs font-mono space-y-2">
-            <div className="flex items-center space-x-2 text-emerald-400 font-bold">
-              <Globe className="w-4 h-4" />
-              <span>Carbon forecast source: Electricity Maps</span>
-            </div>
-            <p className="text-slate-300 leading-relaxed">
-              Electricity Maps provides the point carbon-intensity forecast. Forecast uncertainty is a separate quantity that must be estimated empirically from historical forecast errors.
-            </p>
-            <div className="text-[11px] text-slate-400 pt-1 border-t border-slate-800">
-              {forecast.dataMode === 'live' ? (
-                <span>
-                  Uncertainty Calibration Status:{' '}
-                  <strong className="text-amber-400">Not yet calibrated</strong> (historical forecast error archive not connected in live mode; point forecasts used directly).
-                </span>
-              ) : (
-                <span>
-                  Uncertainty Calibration Status:{' '}
-                  <strong className="text-teal-400">Benchmark Demo Profile</strong> (controlled trace for algorithm validation).
-                </span>
-              )}
-            </div>
-          </div>
-
           {/* 24-Hour Horizon Bar Chart Visualization */}
           <div className="space-y-3">
             <div className="grid grid-cols-12 sm:grid-cols-24 gap-1 items-end h-40 bg-slate-950/70 p-3 rounded-xl border border-slate-800">
@@ -660,7 +636,7 @@ export const PrototypePage: React.FC = () => {
                   <div
                     key={point.hour}
                     className="flex flex-col items-center justify-end h-full group relative cursor-pointer"
-                    title={`T+${point.hour}:00: ${point.predictedCarbon} gCO2eq/kWh`}
+                    title={`T+${point.hour}:00: ${point.predictedCarbon} gCO2eq/kWh (±${point.stdDev})`}
                   >
                     <div
                       style={{ height: `${heightPercent}%` }}
@@ -677,14 +653,10 @@ export const PrototypePage: React.FC = () => {
                     </span>
 
                     {/* Tooltip */}
-                    <div className="absolute bottom-full mb-2 hidden group-hover:block z-30 w-44 p-2.5 bg-slate-900 text-[10px] font-mono text-slate-200 rounded border border-slate-700 shadow-xl pointer-events-none">
+                    <div className="absolute bottom-full mb-2 hidden group-hover:block z-30 w-36 p-2 bg-slate-900 text-[10px] font-mono text-slate-200 rounded border border-slate-700 shadow-xl pointer-events-none">
                       <div className="text-emerald-400 font-bold">T+{point.hour}:00</div>
                       <div>Intensity: {point.predictedCarbon} gCO2eq/kWh</div>
-                      <div className="text-slate-400">
-                        {point.uncertaintyAvailable && point.stdDev != null
-                          ? `StdDev σ: ±${point.stdDev.toFixed(1)}`
-                          : 'Uncertainty: Not calibrated'}
-                      </div>
+                      <div className="text-slate-400">StdDev &sigma;: &plusmn;{point.stdDev}</div>
                     </div>
                   </div>
                 );
@@ -715,7 +687,7 @@ export const PrototypePage: React.FC = () => {
       {/* 4. SECTION C & D: SCHEDULING DECISION & POLICY COMPARISON */}
       {decision && (
         <section className="space-y-6">
-          {/* SECTION D: ALL SCHEDULING OPTIONS (Candidate Scheduling Windows) */}
+          {/* SECTION D: ALL SCHEDULING OPTIONS (All Candidate Scheduling Windows) */}
           {decision.candidateWindows && decision.candidateWindows.length > 0 && (
             <div className="glass-card rounded-2xl p-6 sm:p-8 border border-slate-800 space-y-5">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-800">
@@ -730,7 +702,7 @@ export const PrototypePage: React.FC = () => {
                     <span>All Candidate Scheduling Windows</span>
                   </h3>
                   <p className="text-xs font-mono text-slate-400 mt-1">
-                    Evaluating every continuous {durationHours}-hour window up to deadline (T+{deadlineHours})
+                    Exhaustively evaluating every possible execution window fitting before deadline (T+0 to T+{deadlineHours})
                   </p>
                 </div>
 
@@ -788,11 +760,13 @@ export const PrototypePage: React.FC = () => {
                     <tr>
                       <th className="p-3">Execution Window</th>
                       <th className="p-3">Wait Delay</th>
-                      <th className="p-3">Avg Grid Intensity (gCO2eq/kWh)</th>
+                      <th className="p-3">Grid Intensity (gCO2eq/kWh)</th>
+                      <th className="p-3">Est. Emissions (gCO2eq)</th>
                       <th className="p-3">Forecast Uncertainty</th>
+                      <th className="p-3">Deadline Risk</th>
                       <th className="p-3">Slack Time</th>
-                      <th className="p-3">Feasibility</th>
-                      <th className="p-3 min-w-[220px]">Evaluation Reason</th>
+                      <th className="p-3">Status</th>
+                      <th className="p-3 min-w-[220px]">Reason</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60">
@@ -804,6 +778,8 @@ export const PrototypePage: React.FC = () => {
                       })
                       .map((win) => {
                         const isRec = win.classification === 'RECOMMENDED';
+                        const isRiskBreach = win.classification === 'REJECTED_HIGH_RISK';
+                        const isDeadlineBreach = win.classification === 'REJECTED_DEADLINE_BREACH';
 
                         return (
                           <tr
@@ -819,7 +795,7 @@ export const PrototypePage: React.FC = () => {
                                 <span className="text-white font-bold">{win.windowLabel}</span>
                                 {isRec && (
                                   <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-bold border border-emerald-500/40">
-                                    RECOMMENDED
+                                    OPTIMUM
                                   </span>
                                 )}
                               </div>
@@ -833,17 +809,33 @@ export const PrototypePage: React.FC = () => {
                               </span>{' '}
                               <span className="text-slate-500 text-[10px]">gCO2eq/kWh</span>
                             </td>
+                            <td className="p-3 whitespace-nowrap">
+                              <span className="text-white font-bold">
+                                {win.predictedCarbonImpactGrams.toFixed(1)}
+                              </span>{' '}
+                              <span className="text-slate-500 text-[10px]">gCO2eq</span>
+                            </td>
                             <td className="p-3 whitespace-nowrap text-slate-300">
-                              {win.uncertaintyStatus === 'calibrated' && win.stdDev != null ? (
-                                <span>±{win.stdDev.toFixed(1)} σ</span>
-                              ) : win.uncertaintyStatus === 'benchmark_demo' && win.stdDev != null ? (
-                                <span className="text-teal-400">±{win.stdDev.toFixed(1)} σ (demo)</span>
-                              ) : (
-                                <span className="text-slate-500 italic">Not calibrated</span>
-                              )}
+                              <span className="text-slate-400">{win.uncertaintyRange}</span>{' '}
+                              <span className="text-[10px] text-slate-500">
+                                (σ={win.stdDev.toFixed(1)})
+                              </span>
+                            </td>
+                            <td className="p-3 whitespace-nowrap">
+                              <span
+                                className={`font-bold ${
+                                  win.deadlineRisk > riskTolerance
+                                    ? 'text-rose-400'
+                                    : win.deadlineRisk > 0
+                                    ? 'text-amber-400'
+                                    : 'text-emerald-400'
+                                }`}
+                              >
+                                {win.deadlineRiskPct}
+                              </span>
                             </td>
                             <td className="p-3 whitespace-nowrap text-slate-400">
-                              {win.slackHours >= 0 ? `${win.slackHours}h remaining` : `${Math.abs(win.slackHours)}h overrun`}
+                              {win.slackHours >= 0 ? `${win.slackHours}h remaining` : `${win.slackHours}h overrun`}
                             </td>
                             <td className="p-3 whitespace-nowrap">
                               {isRec ? (
@@ -888,14 +880,14 @@ export const PrototypePage: React.FC = () => {
 
               <div className="inline-flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-emerald-950/80 border border-emerald-500/40 text-xs font-mono text-emerald-300">
                 <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                <span>Deterministic Feasibility Enforced</span>
+                <span>Risk Calibrated: P(violation) &le; {(riskTolerance * 100).toFixed(0)}%</span>
               </div>
             </div>
 
             {/* Key Metrics */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs font-mono">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-xs font-mono">
               <div className="p-4 rounded-xl bg-slate-950/60 border border-emerald-500/40 space-y-1">
-                <span className="text-slate-400 block text-[11px]">Recommended Window</span>
+                <span className="text-slate-400 block text-[11px]">Recommended</span>
                 <div className="text-lg font-extrabold text-white">
                   {decision.recommendedDecision.selectedWindow}
                 </div>
@@ -903,13 +895,23 @@ export const PrototypePage: React.FC = () => {
               </div>
 
               <div className="p-4 rounded-xl bg-slate-950/60 border border-emerald-500/30 space-y-1">
-                <span className="text-emerald-400 block text-[11px]">Predicted Grid Intensity</span>
+                <span className="text-emerald-400 block text-[11px]">Expected Grid Intensity</span>
                 <div className="text-lg font-extrabold text-emerald-300">
                   {decision.recommendedDecision.predictedCarbonIntensity ?? decision.recommendedDecision.predictedCarbon}{' '}
                   <span className="text-xs text-slate-400">gCO2eq/kWh</span>
                 </div>
                 <span className="text-emerald-400/80 text-[10px]">
-                  {decision.comparisonSummary.carbonSavingsVsImmediatePct}% reduction vs immediate
+                  {decision.comparisonSummary.carbonSavingsVsImmediatePct}% vs Immediate
+                </span>
+              </div>
+
+              <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1">
+                <span className="text-slate-400 block text-[11px]">Deadline Risk</span>
+                <div className="text-lg font-extrabold text-amber-300">
+                  {(decision.recommendedDecision.estimatedDeadlineRisk * 100).toFixed(1)}%
+                </div>
+                <span className="text-slate-500 text-[10px]">
+                  Within &le; {(riskTolerance * 100).toFixed(0)}% tolerance
                 </span>
               </div>
 
@@ -922,13 +924,11 @@ export const PrototypePage: React.FC = () => {
               </div>
 
               <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1">
-                <span className="text-slate-400 block text-[11px]">Deadline Compliance</span>
-                <div className="text-lg font-extrabold text-emerald-400">
-                  Guaranteed Feasible
+                <span className="text-slate-400 block text-[11px]">Risk Tolerance</span>
+                <div className="text-lg font-extrabold text-teal-300">
+                  {(riskTolerance * 100).toFixed(0)}%
                 </div>
-                <span className="text-slate-500 text-[10px]">
-                  Finishes by T+{decision.recommendedDecision.selectedStartHour + durationHours}:00 (Deadline: T+{deadlineHours})
-                </span>
+                <span className="text-slate-500 text-[10px]">User threshold &tau;</span>
               </div>
             </div>
 
@@ -936,33 +936,42 @@ export const PrototypePage: React.FC = () => {
             <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-1 font-mono text-xs">
               <span className="text-emerald-400 font-bold block flex items-center space-x-1.5">
                 <Info className="w-3.5 h-3.5" />
-                <span>Decision Rationale:</span>
+                <span>Reason:</span>
               </span>
               <p className="text-slate-300 leading-relaxed">
                 {decision.recommendedDecision.rationale}
               </p>
             </div>
 
-            {/* Execution Disablement Notice & Manifest Action */}
-            <div className="pt-2 p-4 rounded-xl bg-slate-950/90 border border-amber-500/30 space-y-3 font-mono text-xs">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="space-y-1">
-                  <div className="inline-flex items-center space-x-2 px-2.5 py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold text-[11px]">
-                    <Clock className="w-3.5 h-3.5" />
-                    <span>Execution disabled in current research prototype</span>
-                  </div>
-                  <p className="text-slate-300 text-xs leading-relaxed pt-1">
-                    CarbonRoute currently evaluates and recommends an execution window. Actual workload execution will be integrated after the scheduling model and empirical validation are finalized.
-                  </p>
-                </div>
+            {/* Dispatch Action */}
+            <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="text-xs font-mono text-slate-400">
+                Ready to dispatch workload to Kubernetes Job connector.
+              </div>
 
+              <div className="flex flex-wrap items-center gap-3">
                 <button
                   type="button"
-                  onClick={() => setShowManifestModal(true)}
-                  className="px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-200 font-bold hover:text-emerald-300 hover:border-emerald-500/50 transition-all font-mono flex items-center space-x-2 shrink-0 self-start sm:self-auto"
+                  onClick={handleOpenManifest}
+                  className="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 text-slate-200 font-bold hover:text-emerald-300 hover:border-emerald-500/50 transition-all font-mono flex items-center space-x-2"
                 >
                   <FileCode className="w-4 h-4 text-emerald-400" />
                   <span>Inspect K8s Manifest</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleDispatchJob}
+                  disabled={dispatching || executionRecord?.status === 'running'}
+                  className="px-6 py-3 rounded-xl bg-emerald-500 text-slate-950 font-bold hover:bg-emerald-400 transition-all font-mono flex items-center space-x-2 shadow-lg shadow-emerald-950/50 disabled:opacity-50"
+                >
+                  <Server className={`w-4 h-4 ${dispatching ? 'animate-spin' : ''}`} />
+                  <span>
+                    {executionRecord?.status === 'running'
+                      ? 'Workload Executing...'
+                      : 'Dispatch to Kubernetes & Execute'}
+                  </span>
+                  <ArrowRight className="w-4 h-4 ml-1" />
                 </button>
               </div>
             </div>
@@ -983,14 +992,14 @@ export const PrototypePage: React.FC = () => {
                   <div>
                     <h3 className="text-base font-bold text-white font-mono flex items-center space-x-2">
                       <TrendingDown className="w-4 h-4 text-emerald-400" />
-                      <span>Scheduling Trade-Off Visualizer (Carbon vs. Slack Margin)</span>
+                      <span>Scheduling Trade-Off Visualizer (Carbon vs. Risk)</span>
                     </h3>
                     <p className="text-xs font-mono text-slate-400 mt-1">
-                      Direct trade-off breakdown between immediate dispatch, greedy delay, and CarbonRoute's recommended schedule
+                      Direct trade-off breakdown between immediate dispatch, greedy delay, and CarbonRoute's risk-bounded optimum
                     </p>
                   </div>
                   <span className="text-xs font-mono px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-slate-300">
-                    Deadline: T+{deadlineHours}
+                    Risk Limit: {(riskTolerance * 100).toFixed(0)}%
                   </span>
                 </div>
 
@@ -1015,13 +1024,17 @@ export const PrototypePage: React.FC = () => {
                           <span className="text-white font-bold">0 Hours</span>
                         </div>
                         <div className="flex items-center space-x-2 text-xs">
+                          <span className="text-slate-400">Deadline Risk:</span>
+                          <span className="text-emerald-400 font-bold">0.0% (Zero Risk)</span>
+                        </div>
+                        <div className="flex items-center space-x-2 text-xs">
                           <span className="text-slate-400">Slack Remaining:</span>
-                          <span className="text-emerald-400 font-bold">{deadlineHours - durationHours}h</span>
+                          <span className="text-slate-300 font-bold">{deadlineHours - durationHours}h</span>
                         </div>
                       </div>
                     </div>
                     <div className="pt-3 border-t border-slate-800/80 text-[11px] text-slate-400 leading-relaxed">
-                      Safe on-time completion, but incurs maximum carbon intensity because execution occurs immediately regardless of grid conditions.
+                      Safe on-time completion, but pays maximum carbon penalty because work is executed immediately regardless of grid carbon intensity.
                     </div>
                   </div>
 
@@ -1045,6 +1058,18 @@ export const PrototypePage: React.FC = () => {
                           <span className="text-white font-bold">+{detPol?.waitingTimeHours || 0} Hours</span>
                         </div>
                         <div className="flex items-center space-x-2 text-xs">
+                          <span className="text-slate-400">Deadline Risk:</span>
+                          <span
+                            className={`font-bold ${
+                              (detPol?.estimatedDeadlineRisk || 0) > riskTolerance
+                                ? 'text-rose-400'
+                                : 'text-amber-300'
+                            }`}
+                          >
+                            {(((detPol?.estimatedDeadlineRisk || 0) * 100)).toFixed(1)}%
+                          </span>
+                        </div>
+                        <div className="flex items-center space-x-2 text-xs">
                           <span className="text-slate-400">Slack Remaining:</span>
                           <span className="text-slate-300 font-bold">
                             {Math.max(0, deadlineHours - (detPol?.waitingTimeHours || 0) - durationHours)}h
@@ -1053,7 +1078,9 @@ export const PrototypePage: React.FC = () => {
                       </div>
                     </div>
                     <div className="pt-3 border-t border-slate-800/80 text-[11px] text-slate-400 leading-relaxed">
-                      Greedily targets the lowest point forecast window within the deadline horizon.
+                      {(detPol?.estimatedDeadlineRisk || 0) > riskTolerance
+                        ? `Greedily chases lowest point forecast, but uncertainty pushes risk to ${((detPol?.estimatedDeadlineRisk || 0) * 100).toFixed(1)}%, exceeding safety threshold.`
+                        : 'Selects the lowest point forecast window without accounting for forecast uncertainty variance.'}
                     </div>
                   </div>
 
@@ -1080,7 +1107,13 @@ export const PrototypePage: React.FC = () => {
                           <span className="text-white font-bold">+{recPol.waitingTimeHours} Hours</span>
                         </div>
                         <div className="flex items-center space-x-2 text-xs">
-                          <span className="text-slate-400">Carbon Reduction:</span>
+                          <span className="text-slate-400">Deadline Risk:</span>
+                          <span className="text-emerald-400 font-bold">
+                            {((recPol.estimatedDeadlineRisk || 0) * 100).toFixed(1)}% &le; {(riskTolerance * 100).toFixed(0)}%
+                          </span>
+                        </div>
+                        <div className="flex items-center space-x-2 text-xs">
+                          <span className="text-slate-400">Carbon Savings:</span>
                           <span className="text-emerald-300 font-bold">
                             -{decision.comparisonSummary.carbonSavingsVsImmediatePct}% vs Immediate
                           </span>
@@ -1088,13 +1121,188 @@ export const PrototypePage: React.FC = () => {
                       </div>
                     </div>
                     <div className="pt-3 border-t border-emerald-500/20 text-[11px] text-emerald-200/90 leading-relaxed">
-                      Maximizes emissions reduction subject to deterministic deadline feasibility constraints.
+                      Mathematically bounds risk below user tolerance &tau; while maximizing emissions reduction. The provable sweet spot.
                     </div>
                   </div>
                 </div>
               </div>
             );
           })()}
+
+          {/* RESEARCH INSIGHT: LOWEST PREDICTED CARBON IS NOT ALWAYS THE SAFEST SCHEDULING DECISION */}
+          {decision.researchInsight && (
+            <div className="glass-card rounded-2xl p-6 sm:p-8 border-2 border-indigo-500/40 bg-gradient-to-b from-indigo-950/20 to-slate-900/80 shadow-2xl space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-indigo-500/30 gap-3">
+                <div className="space-y-1">
+                  <div className="flex items-center space-x-2">
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-500 text-slate-950 uppercase tracking-wider">
+                      RESEARCH INSIGHT
+                    </span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-indigo-950/80 text-indigo-300 border border-indigo-500/30">
+                      Carbon vs. Operational Safety
+                    </span>
+                  </div>
+                  <h3 className="text-lg sm:text-xl font-extrabold text-white font-mono">
+                    Lowest Predicted Carbon is Not Always the Safest Scheduling Decision
+                  </h3>
+                  <p className="text-xs text-slate-400 font-mono">
+                    Why greedy delay fails in real-world grid operations: comparing the unconstrained carbon minimum against CarbonRoute's risk-bounded dispatch.
+                  </p>
+                </div>
+                <div className="inline-flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-indigo-950/80 border border-indigo-500/40 text-xs font-mono text-indigo-300 shrink-0">
+                  <ShieldCheck className="w-4 h-4 text-indigo-400" />
+                  <span>Max Risk Bound &tau; = {(riskTolerance * 100).toFixed(0)}%</span>
+                </div>
+              </div>
+
+              {(() => {
+                const ri = decision.researchInsight;
+                const lowWin = ri.lowestCarbonWindow;
+                const recWin = ri.recommendedWindow;
+                const carbonDeltaGrams = Math.max(
+                  0,
+                  Math.round((recWin.predictedCarbonImpactGrams - lowWin.predictedCarbonImpactGrams) * 10) / 10
+                );
+
+                return (
+                  <>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 font-mono">
+                      {/* Candidate 1: Absolute Lowest Predicted Carbon */}
+                      <div className="p-5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-4 flex flex-col justify-between">
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                              Unconstrained Carbon Minimum
+                            </span>
+                            {ri.isLowestCarbonSafe ? (
+                              <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-950 border border-emerald-500/40 text-emerald-300 font-bold uppercase">
+                                Feasible &amp; Safe
+                              </span>
+                            ) : (
+                              <span className="text-[10px] px-2 py-0.5 rounded bg-rose-950 border border-rose-500/40 text-rose-300 font-bold uppercase flex items-center space-x-1">
+                                <AlertCircle className="w-3 h-3 text-rose-400" />
+                                <span>Rejected by CarbonRoute</span>
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xl font-extrabold text-white">
+                            Window {lowWin.windowLabel}
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2 text-xs pt-1">
+                            <div className="p-2.5 bg-slate-900/80 rounded-lg border border-slate-800/80">
+                              <span className="text-slate-500 block text-[10px]">Grid Intensity:</span>
+                              <span className="text-white font-bold text-sm">
+                                {lowWin.predictedCarbonIntensity}{' '}
+                                <span className="text-[10px] font-normal text-slate-400">gCO2eq/kWh</span>
+                              </span>
+                            </div>
+                            <div className="p-2.5 bg-slate-900/80 rounded-lg border border-slate-800/80">
+                              <span className="text-slate-500 block text-[10px]">Est. Workload Emissions:</span>
+                              <span className="text-white font-bold text-sm">
+                                {lowWin.predictedCarbonImpactGrams}{' '}
+                                <span className="text-[10px] font-normal text-slate-400">gCO2eq</span>
+                              </span>
+                            </div>
+                            <div className="p-2.5 bg-slate-900/80 rounded-lg border border-slate-800/80">
+                              <span className="text-slate-500 block text-[10px]">Forecast Uncertainty:</span>
+                              <span className="text-slate-300 font-bold text-sm">
+                                &plusmn;{lowWin.stdDev.toFixed(1)}{' '}
+                                <span className="text-[10px] font-normal text-slate-500">(&sigma;)</span>
+                              </span>
+                            </div>
+                            <div className="p-2.5 bg-slate-900/80 rounded-lg border border-slate-800/80">
+                              <span className="text-slate-500 block text-[10px]">Deadline Risk P(viol):</span>
+                              <span
+                                className={`font-bold text-sm ${
+                                  lowWin.deadlineRisk > riskTolerance
+                                    ? 'text-rose-400'
+                                    : 'text-emerald-400'
+                                }`}
+                              >
+                                {lowWin.deadlineRiskPct}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="pt-3 border-t border-slate-800/80 text-[11px] text-slate-400 leading-relaxed">
+                          {ri.isLowestCarbonSafe
+                            ? 'This window is both the lowest predicted carbon window and complies with the deadline risk constraint.'
+                            : `Greedy deterministic schedulers pick this window because ${lowWin.predictedCarbonIntensity} gCO2eq/kWh looks cheapest, but waiting until ${lowWin.windowLabel} leaves near-zero slack margin and escalates deadline failure probability to ${lowWin.deadlineRiskPct}.`}
+                        </div>
+                      </div>
+
+                      {/* Candidate 2: CarbonRoute Risk-Bounded Selection */}
+                      <div className="p-5 rounded-xl bg-slate-950/80 border-2 border-emerald-500/50 space-y-4 flex flex-col justify-between shadow-lg shadow-emerald-950/40 relative">
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                              CarbonRoute Safe Dispatch
+                            </span>
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500 text-slate-950 font-bold uppercase flex items-center space-x-1">
+                              <CheckCircle className="w-3 h-3 text-slate-950" />
+                              <span>Recommended Choice</span>
+                            </span>
+                          </div>
+                          <div className="text-xl font-extrabold text-emerald-300">
+                            Window {recWin.windowLabel}
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2 text-xs pt-1">
+                            <div className="p-2.5 bg-slate-900/80 rounded-lg border border-emerald-500/30">
+                              <span className="text-slate-500 block text-[10px]">Selected Intensity:</span>
+                              <span className="text-emerald-300 font-bold text-sm">
+                                {recWin.predictedCarbonIntensity}{' '}
+                                <span className="text-[10px] font-normal text-slate-400">gCO2eq/kWh</span>
+                              </span>
+                            </div>
+                            <div className="p-2.5 bg-slate-900/80 rounded-lg border border-emerald-500/30">
+                              <span className="text-slate-500 block text-[10px]">Est. Workload Emissions:</span>
+                              <span className="text-white font-bold text-sm">
+                                {recWin.predictedCarbonImpactGrams}{' '}
+                                <span className="text-[10px] font-normal text-slate-400">gCO2eq</span>
+                              </span>
+                            </div>
+                            <div className="p-2.5 bg-slate-900/80 rounded-lg border border-slate-800/80">
+                              <span className="text-slate-500 block text-[10px]">Deadline Risk P(viol):</span>
+                              <span className="text-emerald-400 font-bold text-sm">
+                                {recWin.deadlineRiskPct} &le; {(riskTolerance * 100).toFixed(0)}%
+                              </span>
+                            </div>
+                            <div className="p-2.5 bg-slate-900/80 rounded-lg border border-slate-800/80">
+                              <span className="text-slate-500 block text-[10px]">Carbon Insurance Delta:</span>
+                              <span className="text-indigo-300 font-bold text-sm">
+                                +{ri.carbonInsurancePenaltyGramsPerKwh}{' '}
+                                <span className="text-[10px] font-normal text-slate-400">g/kWh</span>
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="pt-3 border-t border-emerald-500/20 text-[11px] text-emerald-200/90 leading-relaxed">
+                          {ri.isLowestCarbonSafe
+                            ? 'Selected as the mathematically optimal and safe window without requiring any carbon insurance trade-off.'
+                            : `CarbonRoute pays an intentional "carbon insurance" premium of +${ri.carbonInsurancePenaltyGramsPerKwh} gCO2eq/kWh (+${carbonDeltaGrams} gCO2eq total) to guarantee mathematical deadline safety while still capturing major emissions reductions.`}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Scientific Takeaway Banner */}
+                    <div className="p-4 rounded-xl bg-indigo-950/40 border border-indigo-500/30 flex items-start space-x-3 text-xs font-mono">
+                      <Info className="w-5 h-5 text-indigo-400 shrink-0 mt-0.5" />
+                      <div className="space-y-1 text-slate-200">
+                        <span className="font-bold text-indigo-300 block">Scientific Takeaway:</span>
+                        <p className="leading-relaxed text-slate-300">
+                          {ri.explanation}
+                        </p>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          )}
 
           {/* 5 Schedulers Policy Comparison Table */}
           <div className="glass-card rounded-2xl p-6 sm:p-8 border border-slate-800 space-y-4">
@@ -1104,7 +1312,7 @@ export const PrototypePage: React.FC = () => {
                 <span>5-Policy Scheduling Comparison Matrix</span>
               </h3>
               <span className="text-xs font-mono text-slate-500">
-                Evaluated against identical 24h carbon profile
+                Live evaluation against identical forecast trace
               </span>
             </div>
 
@@ -1115,7 +1323,9 @@ export const PrototypePage: React.FC = () => {
                     <th className="p-3">Policy Name</th>
                     <th className="p-3">Category</th>
                     <th className="p-3">Selected Start</th>
-                    <th className="p-3">Avg Intensity (gCO2eq/kWh)</th>
+                    <th className="p-3">Grid Intensity (gCO2eq/kWh)</th>
+                    <th className="p-3">Est. Emissions (gCO2eq)</th>
+                    <th className="p-3">Deadline Risk</th>
                     <th className="p-3">Wait Time</th>
                     <th className="p-3">Feasibility</th>
                     <th className="p-3">Overhead</th>
@@ -1137,8 +1347,18 @@ export const PrototypePage: React.FC = () => {
                         </td>
                         <td className="p-3 text-slate-400">{pol.category}</td>
                         <td className="p-3 text-slate-200">T+{pol.selectedStartHour}:00</td>
-                        <td className="p-3 text-emerald-400 font-bold">
-                          {pol.predictedCarbonIntensity ?? pol.predictedCarbon} gCO2eq/kWh
+                        <td className="p-3 text-emerald-400 font-bold">{pol.predictedCarbonIntensity ?? pol.predictedCarbon} gCO2eq/kWh</td>
+                        <td className="p-3 text-slate-300">{pol.estimatedWorkloadEmissionsGrams !== undefined ? `${pol.estimatedWorkloadEmissionsGrams} gCO2eq` : '-'}</td>
+                        <td className="p-3">
+                          <span
+                            className={
+                              pol.estimatedDeadlineRisk > riskTolerance
+                                ? 'text-rose-400'
+                                : 'text-emerald-400'
+                            }
+                          >
+                            {(pol.estimatedDeadlineRisk * 100).toFixed(1)}%
+                          </span>
                         </td>
                         <td className="p-3 text-slate-300">+{pol.waitingTimeHours}h</td>
                         <td className="p-3">
@@ -1163,76 +1383,200 @@ export const PrototypePage: React.FC = () => {
         </section>
       )}
 
-      {/* 5. SECTION E: DECLARATIVE KUBERNETES MANIFEST PREVIEW */}
-      <section className="glass-card rounded-2xl p-6 sm:p-8 border border-slate-800 space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-800 gap-3">
-          <div className="space-y-1">
-            <div className="flex items-center space-x-2">
-              <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                STEP 4 &bull; INTEGRATION
-              </span>
-              <h3 className="text-lg font-bold text-white font-mono flex items-center space-x-2">
-                <FileCode className="w-4 h-4 text-emerald-400" />
-                <span>Declarative Kubernetes Job Manifest Preview</span>
-              </h3>
+      {/* 5. SECTION E: KUBERNETES EXECUTION MONITOR & CONTAINER LOGS */}
+      {executionRecord && (
+        <section className="glass-card rounded-2xl p-6 sm:p-8 border border-slate-800 space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-800 gap-3">
+            <div className="space-y-1">
+              <div className="flex items-center space-x-2">
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                  STEP 4 &bull; EXECUTION
+                </span>
+                <h3 className="text-lg font-bold text-white font-mono flex items-center space-x-2">
+                  <Server className="w-4 h-4 text-emerald-400" />
+                  <span>Kubernetes Workload Execution Monitor</span>
+                </h3>
+              </div>
+              <p className="text-xs text-slate-400 font-mono">
+                Job ID: <strong className="text-white">{executionRecord.jobId}</strong> &bull; Pod:{' '}
+                <strong className="text-slate-300">{executionRecord.podName}</strong>
+              </p>
             </div>
-            <p className="text-xs text-slate-400 font-mono">
-              Synthesized declarative <code className="text-emerald-400">batch/v1</code> Job specification for downstream cluster dispatch.
-            </p>
+
+            <div className="flex items-center space-x-2">
+              <span
+                className={`px-3 py-1 rounded-full text-xs font-mono font-bold uppercase tracking-wider ${
+                  executionRecord.status === 'completed'
+                    ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                    : executionRecord.status === 'running'
+                    ? 'bg-amber-950 text-amber-300 border border-amber-800 animate-pulse'
+                    : 'bg-slate-900 text-slate-400 border border-slate-800'
+                }`}
+              >
+                Status: {executionRecord.status}
+              </span>
+            </div>
           </div>
 
-          <div className="flex items-center space-x-2">
-            <span className="px-3 py-1 rounded-full text-xs font-mono font-bold uppercase tracking-wider bg-amber-950/80 text-amber-300 border border-amber-800/60">
-              Execution: Disabled in Prototype
-            </span>
+          {/* Mode Notice Banner */}
+          <div className="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 text-xs font-mono flex items-start space-x-2.5 text-slate-300">
+            <Info className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+            <div>
+              <span className="text-white font-bold block">Execution Connector Environment:</span>
+              <span className="text-slate-400">{executionRecord.clusterNotice}</span>
+            </div>
           </div>
-        </div>
 
-        {/* Prototype Scope Notice */}
-        <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 text-xs font-mono space-y-2 text-slate-300">
-          <div className="flex items-center space-x-2 text-emerald-400 font-bold">
-            <Info className="w-4 h-4" />
-            <span>Research Prototype Notice:</span>
-          </div>
-          <p className="leading-relaxed text-slate-400">
-            CarbonRoute operates as a scheduling decision engine. The prototype outputs declarative Kubernetes manifests configured with the optimal execution window annotations, ready for deployment via standard cluster GitOps workflows (<code className="text-emerald-300">kubectl apply -f</code>). Direct in-prototype workload dispatch and physical hardware power telemetry will be integrated in the next milestone.
-          </p>
-        </div>
-
-        {/* Manifest Code Preview */}
-        <div className="space-y-2 font-mono text-xs">
-          <div className="flex items-center justify-between text-slate-400">
-            <span>Synthesized Manifest: <code className="text-emerald-300">manifest.yaml</code></span>
-            <button
-              type="button"
-              onClick={() => {
-                navigator.clipboard.writeText(manifestYaml);
-                setManifestCopied(true);
-                setTimeout(() => setManifestCopied(false), 2000);
-              }}
-              className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-200 hover:text-emerald-400 hover:border-emerald-500/40 flex items-center space-x-1.5 transition-all"
+          {/* Lifecycle Stepper */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs font-mono">
+            <div
+              className={`p-4 rounded-xl border ${
+                executionRecord.status === 'scheduled' ||
+                executionRecord.status === 'running' ||
+                executionRecord.status === 'completed'
+                  ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-300'
+                  : 'bg-slate-900 border-slate-800 text-slate-400'
+              }`}
             >
-              {manifestCopied ? (
-                <>
-                  <Check className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="text-emerald-400 font-bold">Copied to Clipboard</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="w-3.5 h-3.5" />
-                  <span>Copy Manifest YAML</span>
-                </>
-              )}
-            </button>
+              <div className="font-bold mb-1">1. Staged &amp; Scheduled</div>
+              <div className="text-[11px] text-slate-400">
+                Scheduled Start: {new Date(executionRecord.scheduledStartTime).toLocaleTimeString()}
+              </div>
+            </div>
+
+            <div
+              className={`p-4 rounded-xl border ${
+                executionRecord.status === 'running' || executionRecord.status === 'completed'
+                  ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-300'
+                  : 'bg-slate-900 border-slate-800 text-slate-400'
+              }`}
+            >
+              <div className="font-bold mb-1">2. Pod Spawned &amp; Running</div>
+              <div className="text-[11px] text-slate-400">
+                Actual Start:{' '}
+                {executionRecord.actualStartTime
+                  ? new Date(executionRecord.actualStartTime).toLocaleTimeString()
+                  : 'Awaiting container'}
+              </div>
+            </div>
+
+            <div
+              className={`p-4 rounded-xl border ${
+                executionRecord.status === 'completed'
+                  ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-300'
+                  : 'bg-slate-900 border-slate-800 text-slate-400'
+              }`}
+            >
+              <div className="font-bold mb-1">3. Workload Completed</div>
+              <div className="text-[11px] text-slate-400">
+                Exit Code: {executionRecord.exitCode ?? 'Pending'} &bull; Finished:{' '}
+                {executionRecord.completionTime
+                  ? new Date(executionRecord.completionTime).toLocaleTimeString()
+                  : 'In progress'}
+              </div>
+            </div>
           </div>
 
-          <pre className="p-5 rounded-xl bg-slate-950 border border-slate-800 text-emerald-300 text-xs overflow-x-auto leading-relaxed select-text font-mono max-h-96 overflow-y-auto">
-            {manifestYaml || 'Scheduling decision pending...'}
-          </pre>
-        </div>
-      </section>
+          {/* Live Terminal Log Viewer */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs font-mono text-slate-400">
+              <span className="flex items-center space-x-1.5">
+                <Terminal className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Container stdout / stderr Logs</span>
+              </span>
+              <span className="text-[10px] text-slate-500">Live stream</span>
+            </div>
 
-      {/* 6. SECTION F: KEY FEASIBILITY DEMO (SAME FORECAST, DIFFERENT UNCERTAINTY) */}
+            <div
+              ref={terminalLogsRef}
+              className="w-full h-52 bg-slate-950 p-4 rounded-xl border border-slate-800 overflow-y-auto font-mono text-xs text-emerald-300 space-y-1 select-text"
+            >
+              {executionRecord.logs.map((line, i) => (
+                <div key={i} className="leading-relaxed">
+                  {line}
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* 6. SECTION F: RESULTS DASHBOARD */}
+      {executionRecord && executionRecord.status === 'completed' && (
+        <section className="glass-card rounded-2xl p-6 sm:p-8 border border-slate-800 space-y-6">
+          <div className="pb-4 border-b border-slate-800 space-y-1">
+            <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+              STEP 5 &bull; RESULTS
+            </span>
+            <h3 className="text-lg font-bold text-white font-mono flex items-center space-x-2">
+              <BarChart3 className="w-4 h-4 text-emerald-400" />
+              <span>Execution Results &amp; Carbon Accounting</span>
+            </h3>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 text-xs font-mono">
+            <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+              <span className="text-slate-400 text-[11px] block">Predicted Grid Intensity</span>
+              <div className="text-xl font-bold text-white">
+                {executionRecord.predictedCarbon} gCO2eq/kWh
+              </div>
+              <span className="text-[10px] text-slate-500">Forecast at scheduling</span>
+            </div>
+
+            <div className="p-4 rounded-xl bg-slate-900 border border-emerald-500/30 space-y-1">
+              <span className="text-emerald-400 text-[11px] block">Realized Grid Intensity</span>
+              <div className="text-xl font-bold text-emerald-300">
+                {executionRecord.realizedCarbon} gCO2eq/kWh
+              </div>
+              <span className="text-[10px] text-emerald-400">Observed grid outcome</span>
+            </div>
+
+            {(() => {
+              const realized =
+                typeof executionRecord.realizedCarbon === 'number'
+                  ? executionRecord.realizedCarbon
+                  : Number(executionRecord.realizedCarbon) || executionRecord.predictedCarbon;
+              const error =
+                executionRecord.carbonError ?? realized - executionRecord.predictedCarbon;
+              return (
+                <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+                  <span className="text-slate-400 text-[11px] block">Intensity Error</span>
+                  <div
+                    className={`text-xl font-bold ${
+                      error >= 0 ? 'text-amber-400' : 'text-emerald-400'
+                    }`}
+                  >
+                    {error > 0 ? '+' : ''}
+                    {error} gCO2eq/kWh
+                  </div>
+                  <span className="text-[10px] text-slate-500">Realized &minus; Predicted</span>
+                </div>
+              );
+            })()}
+
+            <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+              <span className="text-slate-400 text-[11px] block">Execution Duration</span>
+              <div className="text-xl font-bold text-white">
+                {executionRecord.durationSeconds}s
+              </div>
+              <span className="text-[10px] text-slate-500">Active CPU runtime</span>
+            </div>
+
+            <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+              <span className="text-slate-400 text-[11px] block">Deadline / SLA Result</span>
+              <div className="text-xl font-bold text-emerald-400">On Schedule</div>
+              <span className="text-[10px] text-emerald-400">0% violation</span>
+            </div>
+          </div>
+
+          {/* Measurement disclaimer */}
+          <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 text-[11px] text-slate-400 font-mono">
+            <span className="text-slate-300 font-semibold">Note on Metrics:</span> Grid carbon intensity is tracked in <code className="text-emerald-400">gCO2eq/kWh</code>. Workload carbon emissions in <code className="text-emerald-400">gCO2eq</code> are modeled estimates derived from scheduled execution duration and estimated hardware power draw; direct physical energy consumption is not claimed as measured unless hardware power meters are instrumented.
+          </div>
+        </section>
+      )}
+
+      {/* 7. SECTION G: KEY FEASIBILITY DEMO (SAME FORECAST, DIFFERENT UNCERTAINTY) */}
       <section className="space-y-4">
         <div className="pb-2 border-b border-slate-800 space-y-1">
           <div className="inline-flex items-center space-x-2 px-3 py-1 rounded bg-teal-500/10 border border-teal-500/30 text-teal-300 text-xs font-mono">
@@ -1252,7 +1596,7 @@ export const PrototypePage: React.FC = () => {
         <FeasibilityDemoVisualizer />
       </section>
 
-      {/* 7. Kubernetes Manifest Modal */}
+      {/* 8. Kubernetes Manifest Inspector Modal */}
       {showManifestModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="glass-card w-full max-w-3xl rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
@@ -1263,7 +1607,7 @@ export const PrototypePage: React.FC = () => {
                   Kubernetes batch/v1 Job Manifest
                 </h3>
                 <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-950 text-emerald-400 border border-emerald-800">
-                  Declarative Spec
+                  Ready to Apply
                 </span>
               </div>
               <button
@@ -1283,7 +1627,8 @@ export const PrototypePage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => {
-                    navigator.clipboard.writeText(manifestYaml);
+                    const yamlStr = toYamlString(manifestData);
+                    navigator.clipboard.writeText(yamlStr);
                     setManifestCopied(true);
                     setTimeout(() => setManifestCopied(false), 2000);
                   }}
@@ -1310,14 +1655,14 @@ export const PrototypePage: React.FC = () => {
                 </div>
               ) : (
                 <pre className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-emerald-300 text-xs overflow-x-auto leading-relaxed select-text font-mono">
-                  {manifestYaml}
+                  {toYamlString(manifestData)}
                 </pre>
               )}
             </div>
 
             <div className="p-4 border-t border-slate-800 bg-slate-950/60 flex items-center justify-between text-xs font-mono text-slate-400">
               <span>
-                Deploy via: <code>kubectl apply -f manifest.yaml</code>
+                Execute with: <code>kubectl apply -f manifest.yaml</code>
               </span>
               <button
                 type="button"
