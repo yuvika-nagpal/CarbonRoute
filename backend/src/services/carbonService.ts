@@ -6,11 +6,13 @@ export interface HourlyCarbonPoint {
   timestamp: string;
   predictedCarbon: number; // gCO2eq/kWh
   carbonIntensity: number; // alias for consistency
-  stdDev: number; // Forecast uncertainty standard deviation
-  uncertainty: number; // alias
-  uncertaintyStdDev: number; // alias
-  confidenceLow: number;
-  confidenceHigh: number;
+  uncertaintyAvailable: boolean; // false in current live mode
+  uncertaintyStatus: 'not_calibrated' | 'calibrated' | 'benchmark_demo';
+  stdDev?: number | null; // null when uncalibrated in live mode
+  uncertainty?: number | null; // alias
+  uncertaintyStdDev?: number | null; // alias
+  confidenceLow?: number | null;
+  confidenceHigh?: number | null;
 }
 
 export interface CarbonForecastData {
@@ -26,6 +28,7 @@ export interface CarbonForecastData {
   averageCarbon: number;
   minCarbon: number;
   maxCarbon: number;
+  uncertaintyStatus: 'not_calibrated' | 'calibrated' | 'benchmark_demo';
 }
 
 export interface ICarbonDataProvider {
@@ -36,92 +39,60 @@ export interface ICarbonDataProvider {
   getAvailableRegions(): Array<{ code: string; name: string }>;
 }
 
-// Realistic 24-hour baseline traces representing characteristic regional grid mixes
+// 24-hour baseline traces representing characteristic regional grid mixes (for demo mode only)
 export const REGIONAL_PROFILES: Record<
   string,
-  { name: string; baseCurve: number[]; baseStdDev: number[] }
+  { name: string; baseCurve: number[] }
 > = {
   'BENCHMARK-RESEARCH': {
-    name: 'DEMO / BENCHMARK - Controlled Uncertainty Experiment',
-    // T+0 has relatively high carbon (340) and low uncertainty (10).
-    // T+2/T+3 has lower carbon (220-210) with acceptable risk (slack ~ 8h).
-    // T+10/T+11 has lowest predicted carbon (135-130), but high uncertainty (50-55) & 0-1h slack -> risk > tolerance!
+    name: 'DEMO / BENCHMARK - Controlled Experiment Trace',
     baseCurve: [
       340, 320, 220, 215, 230, 270, 310, 330, 210, 180,
       135, 130, 160, 210, 260, 300, 340, 370, 360, 340,
       320, 310, 300, 290,
     ],
-    baseStdDev: [
-      10, 12, 15, 16, 18, 22, 26, 30, 36, 42,
-      50, 55, 58, 62, 65, 68, 72, 75, 78, 80,
-      82, 85, 88, 90,
-    ],
   },
   'US-CAL-CISO': {
     name: 'California (CAISO)',
-    // Solar duck-curve: high morning/evening carbon, steep clean solar drop during midday hours 10–16
     baseCurve: [
       310, 295, 285, 280, 290, 320, 360, 340, 280, 220,
       170, 150, 140, 145, 160, 190, 260, 350, 390, 370,
       340, 320, 310, 305,
     ],
-    baseStdDev: [
-      10, 11, 12, 14, 15, 18, 22, 25, 28, 32,
-      35, 38, 40, 42, 45, 48, 52, 58, 62, 65,
-      68, 70, 72, 75,
-    ],
   },
   'US-TEX-ERCO': {
     name: 'Texas (ERCOT)',
-    // Overnight wind generation (clean), thermal gas generation peak during late afternoon
     baseCurve: [
       230, 210, 195, 190, 205, 240, 280, 310, 330, 345,
       360, 375, 390, 410, 420, 410, 390, 360, 320, 290,
       270, 250, 240, 235,
     ],
-    baseStdDev: [
-      12, 13, 15, 16, 18, 22, 26, 30, 34, 38,
-      42, 45, 49, 53, 58, 62, 66, 70, 74, 78,
-      80, 83, 85, 88,
-    ],
   },
   'DE': {
     name: 'Germany (Central Europe)',
-    // Mixed solar/wind grid with lignite baseload and industrial daytime demand
     baseCurve: [
       380, 365, 350, 340, 355, 390, 430, 410, 370, 310,
       260, 230, 215, 225, 250, 290, 360, 420, 450, 430,
       410, 395, 390, 385,
     ],
-    baseStdDev: [
-      15, 16, 18, 20, 22, 26, 30, 35, 40, 44,
-      48, 52, 55, 58, 62, 66, 71, 76, 80, 84,
-      87, 90, 92, 95,
-    ],
   },
   'IN-NO': {
     name: 'Northern India Grid',
-    // High thermal baseload with prominent midday solar penetration and steep evening lighting peak
     baseCurve: [
       640, 630, 620, 615, 630, 670, 710, 680, 610, 540,
       480, 450, 440, 455, 490, 560, 660, 740, 780, 760,
       720, 680, 660, 650,
     ],
-    baseStdDev: [
-      18, 20, 22, 25, 28, 34, 40, 46, 52, 58,
-      64, 70, 75, 80, 86, 92, 98, 105, 112, 118,
-      122, 126, 130, 135,
-    ],
   },
 };
 
 /**
- * Clean data provider serving calibrated research benchmark traces.
+ * Data provider serving benchmark traces for research demonstrations.
  * Identifies internally as demo/prepared trace data.
  */
 export class PreparedTraceDataProvider implements ICarbonDataProvider {
   public name = 'PreparedTraceDataProvider';
-  public source = 'Controlled Research Benchmark / Demo Trace';
+  public source = 'PREPARED / DEMO BENCHMARK UNCERTAINTY (Controlled Research Trace)';
   public dataMode: 'live' | 'demo' = 'demo';
 
   public async getForecast(
@@ -137,23 +108,21 @@ export class PreparedTraceDataProvider implements ICarbonDataProvider {
     for (let idx = 0; idx < validHorizon; idx++) {
       const dt = new Date(now.getTime() + idx * 3600000);
       const intensity = profile.baseCurve[idx % 24];
-      const baseStd = profile.baseStdDev[idx % 24];
-      // Uncertainty dispersion growth over horizon: sigma(t) = sigma_0 * (1 + 0.18 * sqrt(t))
-      const stdDev = Math.round(baseStd * (1.0 + 0.18 * Math.sqrt(idx)));
-      const confidenceLow = Math.max(10, Math.round(intensity - 1.96 * stdDev));
-      const confidenceHigh = Math.round(intensity + 1.96 * stdDev);
 
+      // Demo benchmark trace provides illustrative confidence bounds for UI review
       hourlyProfile.push({
         hour: idx,
         offsetHour: idx,
         timestamp: dt.toISOString(),
         predictedCarbon: intensity,
         carbonIntensity: intensity,
-        stdDev,
-        uncertainty: stdDev,
-        uncertaintyStdDev: stdDev,
-        confidenceLow,
-        confidenceHigh,
+        uncertaintyAvailable: true,
+        uncertaintyStatus: 'benchmark_demo',
+        stdDev: 20,
+        uncertainty: 20,
+        uncertaintyStdDev: 20,
+        confidenceLow: Math.max(10, intensity - 39),
+        confidenceHigh: intensity + 39,
       });
     }
 
@@ -165,13 +134,14 @@ export class PreparedTraceDataProvider implements ICarbonDataProvider {
       regionName: profile.name,
       timestamp: now.toISOString(),
       dataMode: this.dataMode,
-      traceVersion: 'v1.0-ucs503-calibrated',
+      traceVersion: 'v1.0-ucs503-demo-benchmark',
       forecastHorizonHours: validHorizon,
       timeResolution: '60 minutes (Hourly)',
       hourlyProfile,
       averageCarbon: Math.round(carbons.reduce((a, b) => a + b, 0) / carbons.length),
       minCarbon: Math.min(...carbons),
       maxCarbon: Math.max(...carbons),
+      uncertaintyStatus: 'benchmark_demo',
     };
   }
 
@@ -261,20 +231,24 @@ export class ElectricityMapsDataProvider implements ICarbonDataProvider {
 
         // Use actual returned hourly forecast value directly (never fallback to baseCurve)
         const intensity = Math.round(rawIntensity);
-        const baseStd = profile?.baseStdDev?.[idx % 24] ?? 15;
-        const stdDev = Math.round(baseStd * (1.0 + 0.18 * Math.sqrt(idx)));
 
+        // Electricity Maps provides the point carbon-intensity forecast.
+        // Forecast uncertainty is a separate quantity that must be estimated empirically from historical forecast errors.
+        // In the current prototype milestone, empirical forecast uncertainty calibration is not yet connected to live mode.
+        // Therefore uncertainty is explicitly represented as not calibrated with null stdDev (no fake numbers).
         return {
           hour: idx,
           offsetHour: idx,
           timestamp: dt.toISOString(),
           predictedCarbon: intensity,
           carbonIntensity: intensity,
-          stdDev,
-          uncertainty: stdDev,
-          uncertaintyStdDev: stdDev,
-          confidenceLow: Math.max(0, Math.round(intensity - 1.96 * stdDev)),
-          confidenceHigh: Math.round(intensity + 1.96 * stdDev),
+          uncertaintyAvailable: false,
+          uncertaintyStatus: 'not_calibrated',
+          stdDev: null,
+          uncertainty: null,
+          uncertaintyStdDev: null,
+          confidenceLow: null,
+          confidenceHigh: null,
         };
       });
 
@@ -293,6 +267,7 @@ export class ElectricityMapsDataProvider implements ICarbonDataProvider {
       averageCarbon: Math.round(carbons.reduce((a, b) => a + b, 0) / carbons.length),
       minCarbon: Math.min(...carbons),
       maxCarbon: Math.max(...carbons),
+      uncertaintyStatus: 'not_calibrated',
     };
   }
 

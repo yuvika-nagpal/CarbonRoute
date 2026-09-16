@@ -22,3 +22,8 @@ npm-debug.log*
 # OS Files
 .DS_Store
 Thumbs.db
+
+# Backups and local clones
+frontend-original-backup/
+project/
+team/

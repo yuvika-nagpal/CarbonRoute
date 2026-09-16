@@ -1,0 +1,160 @@
+{
+  "version": "v2.0-empirical-calibrated",
+  "evaluationTimestamp": "2026-09-16T18:14:42.363Z",
+  "testSamples": 6912,
+  "overallMetrics": {
+    "mae": 18.04,
+    "rmse": 23.61,
+    "meanBias": 0.36
+  },
+  "coverageMetrics": {
+    "nominal95_gaussian": 95.18,
+    "nominal95_empiricalQuantile": 93.76,
+    "nominal90_gaussian": 91.25,
+    "nominal90_empiricalQuantile": 89.27,
+    "nominal80_gaussian": 81.28,
+    "nominal80_empiricalQuantile": 79.72
+  },
+  "brierScore": {
+    "overall": 0.1417,
+    "regional": {
+      "US-CAL-CISO": 0.1415,
+      "US-TEX-ERCO": 0.1435,
+      "DE": 0.1415,
+      "IN-NO": 0.1404
+    }
+  },
+  "expectedCalibrationError": {
+    "ece": 0.0155,
+    "bins": [
+      {
+        "binIndex": 0,
+        "binStart": 0,
+        "binEnd": 0.1,
+        "sampleCount": 13824,
+        "meanForecastProb": 0.0664,
+        "observedFreq": 0.0754,
+        "calibrationError": 0.0091
+      },
+      {
+        "binIndex": 1,
+        "binStart": 0.1,
+        "binEnd": 0.2,
+        "sampleCount": 0,
+        "meanForecastProb": 0.15,
+        "observedFreq": 0,
+        "calibrationError": 0.15
+      },
+      {
+        "binIndex": 2,
+        "binStart": 0.2,
+        "binEnd": 0.3,
+        "sampleCount": 6912,
+        "meanForecastProb": 0.2119,
+        "observedFreq": 0.2012,
+        "calibrationError": 0.0106
+      },
+      {
+        "binIndex": 3,
+        "binStart": 0.3,
+        "binEnd": 0.4,
+        "sampleCount": 6912,
+        "meanForecastProb": 0.3821,
+        "observedFreq": 0.3595,
+        "calibrationError": 0.0226
+      },
+      {
+        "binIndex": 4,
+        "binStart": 0.4,
+        "binEnd": 0.5,
+        "sampleCount": 0,
+        "meanForecastProb": 0.45,
+        "observedFreq": 0,
+        "calibrationError": 0.45
+      },
+      {
+        "binIndex": 5,
+        "binStart": 0.5,
+        "binEnd": 0.6,
+        "sampleCount": 6912,
+        "meanForecastProb": 0.5,
+        "observedFreq": 0.4676,
+        "calibrationError": 0.0324
+      },
+      {
+        "binIndex": 6,
+        "binStart": 0.6,
+        "binEnd": 0.7,
+        "sampleCount": 6912,
+        "meanForecastProb": 0.6179,
+        "observedFreq": 0.6011,
+        "calibrationError": 0.0168
+      },
+      {
+        "binIndex": 7,
+        "binStart": 0.7,
+        "binEnd": 0.8,
+        "sampleCount": 6912,
+        "meanForecastProb": 0.7881,
+        "observedFreq": 0.7889,
+        "calibrationError": 0.0008
+      },
+      {
+        "binIndex": 8,
+        "binStart": 0.8,
+        "binEnd": 0.9,
+        "sampleCount": 0,
+        "meanForecastProb": 0.85,
+        "observedFreq": 0,
+        "calibrationError": 0.85
+      },
+      {
+        "binIndex": 9,
+        "binStart": 0.9,
+        "binEnd": 1,
+        "sampleCount": 13824,
+        "meanForecastProb": 0.9336,
+        "observedFreq": 0.9525,
+        "calibrationError": 0.0189
+      }
+    ]
+  },
+  "regionalBreakdown": {
+    "US-CAL-CISO": {
+      "sampleCount": 1728,
+      "mae": 14.46,
+      "rmse": 18.53,
+      "bias": 0.54,
+      "coverage95Gaussian": 95.95,
+      "coverage95Quantile": 94.44,
+      "brierScore": 0.1415
+    },
+    "US-TEX-ERCO": {
+      "sampleCount": 1728,
+      "mae": 16.76,
+      "rmse": 21.7,
+      "bias": -0.06,
+      "coverage95Gaussian": 95.08,
+      "coverage95Quantile": 92.94,
+      "brierScore": 0.1435
+    },
+    "DE": {
+      "sampleCount": 1728,
+      "mae": 17.84,
+      "rmse": 22.72,
+      "bias": 0.53,
+      "coverage95Gaussian": 95.08,
+      "coverage95Quantile": 93.98,
+      "brierScore": 0.1415
+    },
+    "IN-NO": {
+      "sampleCount": 1728,
+      "mae": 23.09,
+      "rmse": 29.98,
+      "bias": 0.43,
+      "coverage95Gaussian": 94.62,
+      "coverage95Quantile": 93.69,
+      "brierScore": 0.1404
+    }
+  }
+}

@@ -512,17 +512,15 @@ export const SystemDesignPage: React.FC = () => {
                 <div className="p-4 space-y-3">
                   <div className="space-y-1 text-slate-300">
                     <div className="text-[10px] text-slate-500 uppercase font-bold">Attributes</div>
-                    <div>+ baseStdDev: number (sigma_0)</div>
-                    <div>+ horizonGrowthBeta: number</div>
-                    <div>+ horizonGrowthGamma: number</div>
-                    <div>+ confidenceZ: number = 1.96</div>
+                    <div>+ carbonEstimator: CarbonUncertaintyEstimator</div>
+                    <div>+ runtimeEstimator: RuntimeUncertaintyEstimator</div>
+                    <div>+ calibrationStatus: CalibrationState</div>
                   </div>
                   <div className="pt-2 border-t border-slate-800/80 space-y-1 text-sky-300">
                     <div className="text-[10px] text-slate-500 uppercase font-bold">Methods</div>
-                    <div>+ computeStdDev(horizonHours): number</div>
-                    <div>+ computeBounds(mu, sigma): [low, high]</div>
-                    <div>+ computeDeadlineRisk(slack, sigma): number</div>
-                    <div>+ erfcChebyshev(x): number</div>
+                    <div>+ getCarbonUncertainty(region, horizon): Promise&lt;Estimate&gt;</div>
+                    <div>+ calculateDeadlineRisk(start, dur, ddl, sigma?): Result</div>
+                    <div>+ erfc(x): number</div>
                   </div>
                 </div>
               </div>

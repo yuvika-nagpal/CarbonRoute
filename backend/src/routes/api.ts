@@ -32,6 +32,11 @@ import {
   recordExperiment,
   getExperiments,
 } from '../controllers/prototypeController';
+import {
+  getUncertaintyModel,
+  getUncertaintyEvaluation,
+  triggerRecalibration,
+} from '../controllers/uncertaintyController';
 import { authenticateToken, requireAdmin, optionalAuth } from '../middleware/auth';
 import { uploadMiddleware } from '../middleware/upload';
 import { db } from '../models/db';
@@ -110,6 +115,13 @@ router.get('/cluster/health', getClusterHealth);
 
 router.post('/experiments', recordExperiment);
 router.get('/experiments', getExperiments);
+
+// ==========================================
+// Empirical Uncertainty & Calibration Routes
+// ==========================================
+router.get('/uncertainty/model', getUncertaintyModel);
+router.get('/uncertainty/evaluation', getUncertaintyEvaluation);
+router.post('/uncertainty/calibrate', triggerRecalibration);
 
 // Audit Logs (Admin only)
 router.get('/admin/audit-logs', authenticateToken, requireAdmin, (_req, res) => {

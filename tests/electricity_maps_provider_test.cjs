@@ -6,9 +6,10 @@
  * 2. Missing or empty API key strictly throws "Live carbon forecast unavailable: ..." without silent fallback
  * 3. Dynamic Region Passing: zone parameter in API URL is dynamically formatted for the requested region
  * 4. Response Parsing: Scheduler consumes actual live forecast values without using REGIONAL_PROFILES baseCurve
- * 5. 5-Scheduler Policy Consumption: policies evaluate over the live returned forecast with correct units
- * 6. Explicit Demo Mode: PreparedTraceDataProvider is available when mode === 'demo'
- * 7. Error Propagation: Network errors, HTTP 401, HTTP 429, and malformed responses propagate with HTTP 503 error format
+ * 5. Scientific Honesty: Live mode sets uncertaintyAvailable=false, uncertaintyStatus='not_calibrated', stdDev=null
+ * 6. 5-Scheduler Policy Consumption: policies evaluate over the live returned forecast with correct intensity units (gCO2eq/kWh)
+ * 7. Explicit Demo Mode: PreparedTraceDataProvider is available when mode === 'demo'
+ * 8. Error Propagation: Network errors, HTTP 401, HTTP 429, and malformed responses propagate with HTTP 503 error format
  */
 
 const {
@@ -197,10 +198,41 @@ async function runElectricityMapsTests() {
     });
 
     // -------------------------------------------------------------
-    // TEST 5: Scheduler Consumes Actual Live Forecast Values
+    // TEST 5: Scientific Honesty - Live Mode Uncertainty is Not Fabricated
     // -------------------------------------------------------------
-    await assert('5. All 5 scheduling policies consume actual live forecast values and metrics', async () => {
-      // Mock live forecast where hour 6-7 is the cleanest window (e.g. 75 gCO2eq/kWh)
+    await assert('5. Scientific Honesty: Live mode sets uncertaintyAvailable=false, uncertaintyStatus="not_calibrated", stdDev=null', async () => {
+      global.fetch = async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          forecast: Array.from({ length: 24 }, (_, i) => ({
+            datetime: new Date(Date.now() + i * 3600000).toISOString(),
+            carbonIntensity: 180 + i * 2,
+          })),
+        }),
+      });
+
+      const testProvider = new ElectricityMapsDataProvider('test-valid-key');
+      const forecast = await testProvider.getForecast('US-CAL-CISO', 24);
+
+      for (let i = 0; i < forecast.hourlyProfile.length; i++) {
+        const pt = forecast.hourlyProfile[i];
+        if (pt.uncertaintyAvailable !== false) {
+          throw new Error(`Hour ${i}: uncertaintyAvailable should be false in live mode, got ${pt.uncertaintyAvailable}`);
+        }
+        if (pt.uncertaintyStatus !== 'not_calibrated') {
+          throw new Error(`Hour ${i}: uncertaintyStatus should be 'not_calibrated', got ${pt.uncertaintyStatus}`);
+        }
+        if (pt.stdDev !== null && pt.stdDev !== undefined) {
+          throw new Error(`Hour ${i}: stdDev should be null in live mode, got ${pt.stdDev}`);
+        }
+      }
+    });
+
+    // -------------------------------------------------------------
+    // TEST 6: Scheduler Consumes Actual Live Forecast Values
+    // -------------------------------------------------------------
+    await assert('6. All 5 scheduling policies consume live forecast values with gCO2eq/kWh units and no fake emissions', async () => {
       const mockIntensities = Array(24).fill(300);
       mockIntensities[6] = 75;
       mockIntensities[7] = 85;
@@ -235,7 +267,7 @@ async function runElectricityMapsTests() {
         createdAt: new Date().toISOString(),
       };
 
-      const result = evaluateAllPolicies(testJob, liveForecast, 1.0);
+      const result = evaluateAllPolicies(testJob, liveForecast);
 
       // Verify all 5 policies were evaluated
       if (result.evaluatedPolicies.length !== 5) {
@@ -259,22 +291,16 @@ async function runElectricityMapsTests() {
         if (pol.carbonIntensityUnit !== 'gCO2eq/kWh') {
           throw new Error(`Policy ${pol.policyId} missing or invalid carbonIntensityUnit: ${pol.carbonIntensityUnit}`);
         }
-        if (pol.workloadEmissionsUnit !== 'gCO2eq') {
-          throw new Error(`Policy ${pol.policyId} missing or invalid workloadEmissionsUnit: ${pol.workloadEmissionsUnit}`);
-        }
         if (typeof pol.predictedCarbonIntensity !== 'number') {
           throw new Error(`Policy ${pol.policyId} missing predictedCarbonIntensity number`);
-        }
-        if (typeof pol.estimatedWorkloadEmissionsGrams !== 'number') {
-          throw new Error(`Policy ${pol.policyId} missing estimatedWorkloadEmissionsGrams number`);
         }
       }
     });
 
     // -------------------------------------------------------------
-    // TEST 6: Explicit Demo Mode Continues Working for Benchmarks
+    // TEST 7: Explicit Demo Mode Continues Working for Benchmarks
     // -------------------------------------------------------------
-    await assert('6. Explicit demo mode (mode: "demo") returns benchmark trace independently of API key', async () => {
+    await assert('7. Explicit demo mode (mode: "demo") returns benchmark trace independently of API key', async () => {
       delete process.env.ELECTRICITY_MAPS_API_KEY;
 
       const demoForecast = await CarbonService.getForecast('US-CAL-CISO', 24, 'demo');
@@ -292,12 +318,12 @@ async function runElectricityMapsTests() {
     });
 
     // -------------------------------------------------------------
-    // TEST 7: Error Handling for Network Failures & Bad Responses
+    // TEST 8: Error Handling for Network Failures & Bad Responses
     // -------------------------------------------------------------
-    await assert('7. Propagates HTTP 401, HTTP 429, and network failures with explicit error messages', async () => {
+    await assert('8. Propagates HTTP 401, HTTP 429, and network failures with explicit error messages', async () => {
       const testProvider = new ElectricityMapsDataProvider('invalid-or-ratelimited-key');
 
-      // 7a. HTTP 401 Unauthorized
+      // 8a. HTTP 401 Unauthorized
       global.fetch = async () => ({
         ok: false,
         status: 401,
@@ -315,7 +341,7 @@ async function runElectricityMapsTests() {
       }
       if (!threw401) throw new Error('Failed to throw on HTTP 401');
 
-      // 7b. HTTP 429 Rate Limit
+      // 8b. HTTP 429 Rate Limit
       global.fetch = async () => ({
         ok: false,
         status: 429,
@@ -333,7 +359,7 @@ async function runElectricityMapsTests() {
       }
       if (!threw429) throw new Error('Failed to throw on HTTP 429');
 
-      // 7c. Network fetch exception
+      // 8c. Network fetch exception
       global.fetch = async () => {
         throw new Error('ENOTFOUND api.electricitymap.org');
       };
@@ -349,7 +375,7 @@ async function runElectricityMapsTests() {
       }
       if (!threwNetwork) throw new Error('Failed to throw on network error');
 
-      // 7d. Empty forecast array
+      // 8d. Empty forecast array
       global.fetch = async () => ({
         ok: true,
         status: 200,

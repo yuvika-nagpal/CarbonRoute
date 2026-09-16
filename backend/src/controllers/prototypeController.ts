@@ -15,13 +15,12 @@ const experimentRecords: any[] = [
     durationHours: 2,
     deadlineHours: 12,
     riskTolerance: 0.05,
-    selectedScheduler: 'CarbonRoute Uncertainty-Aware',
+    selectedScheduler: 'CarbonRoute Optimization',
     selectedStartHour: 8,
     predictedCarbon: 170,
-    realizedCarbon: 178,
     waitingTimeHours: 8,
-    deadlineRisk: 0.042,
-    status: 'Completed',
+    deadlineRisk: 0.0,
+    status: 'Scheduled',
   },
   {
     id: 'exp-init-002',
@@ -34,10 +33,9 @@ const experimentRecords: any[] = [
     selectedScheduler: 'Deterministic Carbon-Aware',
     selectedStartHour: 3,
     predictedCarbon: 190,
-    realizedCarbon: 215,
     waitingTimeHours: 3,
-    deadlineRisk: 0.088,
-    status: 'Completed',
+    deadlineRisk: 0.0,
+    status: 'Scheduled',
   },
 ];
 
@@ -159,13 +157,9 @@ export const dispatchJobToExecution = async (req: Request, res: Response) => {
     const job = registeredJobs.get(jobId);
     const {
       predictedCarbon = 200,
-      simulatedDurationSec = 6,
       scheduledHour = 0,
     } = req.body;
 
-    const containerImage = job?.isContainerImage
-      ? job.commandOrImage
-      : 'ghcr.io/carbonroute/workload-synthetic:latest';
     const command = job?.commandOrImage || 'python workload.py';
     const cpu = job?.cpu || 1;
     const memoryMb = job?.memoryMb || 512;
@@ -176,13 +170,12 @@ export const dispatchJobToExecution = async (req: Request, res: Response) => {
       command,
       cpu,
       memoryMb,
-      Number(predictedCarbon),
-      Number(simulatedDurationSec)
+      Number(predictedCarbon)
     );
 
     return res.json({
       success: true,
-      message: `Job ${jobId} dispatched to Kubernetes execution connector.`,
+      message: 'Workload execution is disabled in the current research prototype milestone. Declarative manifest preview generated.',
       data: executionRecord,
     });
   } catch (error: any) {
@@ -202,7 +195,7 @@ export const getJobStatus = (req: Request, res: Response) => {
         data: {
           jobId,
           status: registered.status,
-          logs: ['[Waiting] Workload registered. Click "Dispatch Workload" to execute.'],
+          logs: ['[Waiting] Workload registered. Execution integration scheduled for next research milestone.'],
         },
       });
     }
@@ -228,20 +221,15 @@ export const getJobResults = (req: Request, res: Response) => {
     data: {
       jobId: execution.jobId,
       k8sJobName: execution.k8sJobName,
-      podId: execution.podId,
-      podName: execution.podName,
       status: execution.status,
       scheduledStartTime: execution.scheduledStartTime,
-      actualStartTime: execution.actualStartTime || 'Pending',
-      completionTime: execution.completionTime || 'Pending',
-      durationSeconds: execution.durationSeconds,
-      exitCode: execution.exitCode ?? 'N/A',
+      durationHours: execution.durationHours,
       predictedCarbon: execution.predictedCarbon,
-      realizedCarbon: execution.realizedCarbon,
-      carbonError: execution.carbonError,
       clusterMode: execution.clusterMode,
       clusterNotice: execution.clusterNotice,
       logs: execution.logs,
+      manifestPreview: execution.manifestPreview,
+      executionDisabled: execution.executionDisabled,
     },
   });
 };

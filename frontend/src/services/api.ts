@@ -785,7 +785,7 @@ export const api = {
 
   async dispatchJob(
     jobId: string,
-    payload?: { predictedCarbon?: number; simulatedDurationSec?: number }
+    payload?: { predictedCarbon?: number; scheduledHour?: number }
   ): Promise<ApiResponse<K8sJobExecutionRecord>> {
     try {
       const res = await fetch(`${API_BASE}/jobs/${encodeURIComponent(jobId)}/dispatch`, {

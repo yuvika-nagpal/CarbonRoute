@@ -148,7 +148,11 @@ export interface HourlyCarbonPoint {
   hour: number;
   timestamp: string;
   predictedCarbon: number;
-  stdDev: number;
+  stdDev?: number | null;
+  uncertaintyAvailable?: boolean;
+  uncertaintyStatus?: string;
+  confidenceLow?: number | null;
+  confidenceHigh?: number | null;
 }
 
 export interface CarbonForecastData {
@@ -164,6 +168,7 @@ export interface CarbonForecastData {
   averageCarbon: number;
   minCarbon: number;
   maxCarbon: number;
+  uncertaintyStatus?: string;
 }
 
 export interface PolicyEvaluationResult {
@@ -171,12 +176,11 @@ export interface PolicyEvaluationResult {
   policyName: string;
   category: 'Baseline' | 'Deterministic' | 'Uncertainty-Aware';
   selectedStartHour: number;
+  selectedEndHour?: number;
   selectedWindow: string;
-  predictedCarbon: number; // legacy alias for grid intensity
+  predictedCarbon: number; // grid intensity alias
   predictedCarbonIntensity?: number; // gCO2eq/kWh
-  estimatedWorkloadEmissionsGrams?: number; // gCO2eq
   carbonIntensityUnit?: string; // 'gCO2eq/kWh'
-  workloadEmissionsUnit?: string; // 'gCO2eq'
   estimatedDeadlineRisk: number;
   waitingTimeHours: number;
   isFeasible: boolean;
@@ -190,11 +194,12 @@ export interface CandidateWindowEvaluation {
   endHour: number;
   windowLabel: string;
   predictedCarbonIntensity: number; // gCO2eq/kWh
-  predictedCarbonImpactGrams: number; // estimated total grams CO2
-  stdDev: number; // forecast uncertainty sigma
-  uncertaintyRange: string;
-  deadlineRisk: number; // decimal probability
-  deadlineRiskPct: string; // e.g. "4.0%"
+  stdDev?: number | null; // null when uncalibrated
+  uncertaintyAvailable?: boolean;
+  uncertaintyStatus?: string;
+  uncertaintyRange?: string;
+  deadlineRisk: number;
+  deadlineRiskPct: string;
   slackHours: number;
   waitingTimeHours: number;
   isFeasible: boolean;
@@ -204,7 +209,7 @@ export interface CandidateWindowEvaluation {
     | 'FEASIBLE'
     | 'REJECTED_HIGH_RISK'
     | 'REJECTED_DEADLINE_BREACH';
-  classificationLabel: string; // "RECOMMENDED" | "FEASIBLE BUT NOT OPTIMAL" | "REJECTED — HIGH DEADLINE RISK" | "REJECTED — MISSES DEADLINE"
+  classificationLabel: string;
   reason: string;
 }
 
@@ -221,23 +226,31 @@ export interface SchedulingDecisionResponse {
   carbonSource: string;
   dataMode: 'live' | 'demo';
   region: string;
+  durationHours?: number;
   candidateWindows?: CandidateWindowEvaluation[];
   evaluatedPolicies: PolicyEvaluationResult[];
   recommendedDecision: PolicyEvaluationResult;
   comparisonSummary: {
     carbonSavingsVsImmediatePct: number;
     delayPenaltyHours: number;
-    riskDifferenceVsDeterministic: number;
+    riskDifferenceVsDeterministic?: number;
   };
   researchInsight?: ResearchInsightLowestVsSafest;
+  researchStatus?: {
+    liveForecastSource: string;
+    carbonUncertaintyStatus: string;
+    runtimeRiskStatus: string;
+    executionStatus: string;
+    realizedCarbonStatus: string;
+  };
 }
 
 export interface K8sJobExecutionRecord {
   jobId: string;
   k8sJobName: string;
-  podName: string;
-  namespace: string;
-  status: 'pending' | 'scheduled' | 'running' | 'completed' | 'failed';
+  podName?: string;
+  namespace?: string;
+  status: 'pending' | 'scheduled' | 'running' | 'completed' | 'failed' | 'preview' | 'disabled_in_prototype';
   containerImage: string;
   command: string;
   scheduledStartTime: string;
@@ -245,12 +258,15 @@ export interface K8sJobExecutionRecord {
   completionTime?: string;
   exitCode?: number | string;
   logs: string[];
-  clusterMode: 'minikube' | 'offline_fallback';
+  clusterMode?: 'minikube' | 'offline_fallback' | 'manifest_preview';
   clusterNotice: string;
   predictedCarbon: number;
-  realizedCarbon?: number;
-  carbonError?: number;
-  durationSeconds: number;
+  durationHours?: number;
+  durationSeconds?: number;
+  manifestPreview?: any;
+  executionDisabled?: boolean;
+  realizedCarbon?: number | null;
+  carbonError?: number | null;
 }
 
 export interface ExperimentRecord {
@@ -264,7 +280,7 @@ export interface ExperimentRecord {
   selectedScheduler: string;
   selectedStartHour: number;
   predictedCarbon: number;
-  realizedCarbon: number | string;
+  realizedCarbon?: number | string | null;
   waitingTimeHours: number;
   deadlineRisk: number;
   status: string;
