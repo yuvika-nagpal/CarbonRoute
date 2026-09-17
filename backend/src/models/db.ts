@@ -67,6 +67,21 @@ export interface TeamMember {
   displayOrder: number;
 }
 
+export type TaskStatus = 'planned' | 'in-progress' | 'completed' | 'blocked';
+
+export interface RoadmapTask {
+  id: string;
+  phaseId: string;
+  title: string;
+  description: string;
+  status: TaskStatus;
+  completedAt?: string | null;
+  completedBy?: string | null;
+  assignedTo?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface RoadmapMilestone {
   id: string;
   phaseName?: string;
@@ -75,6 +90,7 @@ export interface RoadmapMilestone {
   description: string;
   status: 'completed' | 'in-progress' | 'planned';
   deliverables: string[];
+  tasks: RoadmapTask[];
   displayOrder: number;
 }
 
@@ -317,6 +333,7 @@ class JsonDatabase {
           description: 'Problem formulation, literature review, carbon intensity data ingestion specification, baseline simulator architecture, and website deployment.',
           status: 'in-progress',
           deliverables: ['Planning Presentation V1', 'Project Portal Deployment', 'Initial Simulator Spec'],
+          tasks: this.getDefaultTasksForMilestone('w1-2'),
           displayOrder: 1,
         },
         {
@@ -326,6 +343,7 @@ class JsonDatabase {
           description: 'Development of discrete-event simulator core, multi-region cloud capacity and pricing models, and synthetic batch workload generators (short, medium, long jobs).',
           status: 'planned',
           deliverables: ['Discrete-Event Simulator Core', 'Workload Generator Trace Engine'],
+          tasks: this.getDefaultTasksForMilestone('w3-4'),
           displayOrder: 2,
         },
         {
@@ -335,6 +353,7 @@ class JsonDatabase {
           description: 'Implementation of reference scheduling policies: Immediate Execution, Earliest Deadline First (EDF), Cost-Aware Scheduler, and Realized-Data Oracle solver.',
           status: 'planned',
           deliverables: ['Baseline Suite', 'Oracle Upper-Bound Reference Solver'],
+          tasks: this.getDefaultTasksForMilestone('w5-6'),
           displayOrder: 3,
         },
         {
@@ -344,6 +363,7 @@ class JsonDatabase {
           description: 'Implementation of deterministic carbon-aware scheduling algorithms and heuristic multi-region workload shifting strategies.',
           status: 'planned',
           deliverables: ['Deterministic Carbon Scheduler', 'Trace Alignment Module'],
+          tasks: this.getDefaultTasksForMilestone('w7-8'),
           displayOrder: 4,
         },
         {
@@ -353,6 +373,7 @@ class JsonDatabase {
           description: 'Parametric and empirical forecast error distribution modeling across 1h to 48h look-ahead horizons to model variance growth over time.',
           status: 'planned',
           deliverables: ['Forecast Error Engine', 'Multi-Horizon Error Distribution Models'],
+          tasks: this.getDefaultTasksForMilestone('w9-10'),
           displayOrder: 5,
         },
         {
@@ -362,6 +383,7 @@ class JsonDatabase {
           description: 'Core CarbonRoute scheduling algorithm enforcing P(deadline violation | decision) <= tau, combined with Brier score calibration and Reliability Diagrams.',
           status: 'planned',
           deliverables: ['CarbonRoute Uncertainty Scheduler', 'Risk Calibration Module (Brier/ECE)'],
+          tasks: this.getDefaultTasksForMilestone('w11-12'),
           displayOrder: 6,
         },
         {
@@ -371,6 +393,7 @@ class JsonDatabase {
           description: 'Systematic stress testing against sudden renewable drop-offs, cloud capacity contention, flash price spikes, and severe forecast skew.',
           status: 'planned',
           deliverables: ['Stress-Testing Matrix', 'Degradation & Robustness Analysis'],
+          tasks: this.getDefaultTasksForMilestone('w13'),
           displayOrder: 7,
         },
         {
@@ -380,6 +403,7 @@ class JsonDatabase {
           description: 'FastAPI REST endpoint exposure for scheduling decisions and interactive web dashboard integration for visualizing schedules and risk curves.',
           status: 'planned',
           deliverables: ['FastAPI Endpoints', 'Interactive Scheduling Dashboard'],
+          tasks: this.getDefaultTasksForMilestone('w14'),
           displayOrder: 8,
         },
         {
@@ -389,6 +413,7 @@ class JsonDatabase {
           description: 'Execution of multi-seed, multi-region reproducible benchmark suite across varying forecast error levels, producing paired statistical evaluations.',
           status: 'planned',
           deliverables: ['Reproducible Benchmark Bundle', 'Statistical Significance Tests'],
+          tasks: this.getDefaultTasksForMilestone('w15'),
           displayOrder: 9,
         },
         {
@@ -398,6 +423,7 @@ class JsonDatabase {
           description: 'Integration of container execution connector dispatching scheduled batch jobs to Kubernetes Jobs with explanation summaries.',
           status: 'planned',
           deliverables: ['Kubernetes Workload Connector', 'End-to-End Container Runner'],
+          tasks: this.getDefaultTasksForMilestone('w16'),
           displayOrder: 10,
         },
         {
@@ -407,10 +433,19 @@ class JsonDatabase {
           description: 'Comprehensive project evaluation, final documentation, open-source repository packaging, and university semester defense presentation.',
           status: 'planned',
           deliverables: ['Final Project Thesis / Report', 'Final Presentation V1', 'Release Artifact'],
+          tasks: this.getDefaultTasksForMilestone('w17'),
           displayOrder: 11,
         },
       ];
       changed = true;
+    } else {
+      // Migrate existing milestones if tasks are missing
+      for (const m of this.data.roadmapMilestones) {
+        if (!m.tasks || m.tasks.length === 0) {
+          m.tasks = this.getDefaultTasksForMilestone(m.id);
+          changed = true;
+        }
+      }
     }
 
     if (this.data.activityLogs.length === 0) {
@@ -610,9 +645,414 @@ class JsonDatabase {
     return this.data.teamMembers[idx];
   }
 
-  // Roadmap Milestones
+  // Roadmap Milestones & Tasks
+  private getDefaultTasksForMilestone(milestoneId: string): RoadmapTask[] {
+    const now = '2026-08-18T00:00:00.000Z';
+    switch (milestoneId) {
+      case 'w1-2':
+        return [
+          {
+            id: 'task-w1-2-1',
+            phaseId: 'w1-2',
+            title: 'Problem formulation and mathematical carbon intensity model',
+            description: 'Literature review, mathematical model of carbon intensity and forecast error variance growth over time.',
+            status: 'completed',
+            completedAt: '2026-08-15',
+            completedBy: 'Yuvika Nagpal',
+            assignedTo: 'Yuvika Nagpal',
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: 'task-w1-2-2',
+            phaseId: 'w1-2',
+            title: 'Literature review on forecast uncertainty and workload shifting',
+            description: 'Evaluate reference scheduling policies and document academic gap for deadline risk calibration.',
+            status: 'completed',
+            completedAt: '2026-08-16',
+            completedBy: 'Kumkum Gupta',
+            assignedTo: 'Kumkum Gupta',
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: 'task-w1-2-3',
+            phaseId: 'w1-2',
+            title: 'Project portal and continuous deployment setup',
+            description: 'Deploy responsive CarbonRoute web portal for continuous semester tracking across devices.',
+            status: 'completed',
+            completedAt: '2026-08-17',
+            completedBy: 'Aaneya Sabharwal',
+            assignedTo: 'Aaneya Sabharwal',
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: 'task-w1-2-4',
+            phaseId: 'w1-2',
+            title: 'Initial simulator prototype architecture specification',
+            description: 'Draft mathematical formulation, discrete-event queue architecture, and trace interface spec.',
+            status: 'in-progress',
+            completedAt: null,
+            completedBy: null,
+            assignedTo: 'Yuvika Nagpal',
+            createdAt: now,
+            updatedAt: now,
+          },
+        ];
+      case 'w3-4':
+        return [
+          {
+            id: 'task-w3-4-1',
+            phaseId: 'w3-4',
+            title: 'Discrete-event simulator core event loop',
+            description: 'Build discrete-event simulation engine with job queues, regional clocks, and execution events.',
+            status: 'planned',
+            completedAt: null,
+            completedBy: null,
+            assignedTo: 'Yuvika Nagpal',
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: 'task-w3-4-2',
+            phaseId: 'w3-4',
+            title: 'Multi-region cloud capacity and pricing models',
+            description: 'Model spot and on-demand regional capacity constraints with dynamic pricing curves.',
+            status: 'planned',
+            completedAt: null,
+            completedBy: null,
+            assignedTo: 'Yuvika Nagpal',
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: 'task-w3-4-3',
+            phaseId: 'w3-4',
+            title: 'Synthetic batch workload generators (short, medium, long jobs)',
+            description: 'Generate synthetic batch workload traces with variable arrival rates, execution times, and resource profiles.',
+            status: 'planned',
+            completedAt: null,
+            completedBy: null,
+            assignedTo: 'Kumkum Gupta',
+            createdAt: now,
+            updatedAt: now,
+          },
+        ];
+      case 'w5-6':
+        return [
+          {
+            id: 'task-w5-6-1',
+            phaseId: 'w5-6',
+            title: 'Immediate Execution baseline scheduler',
+            description: 'Implement baseline heuristic executing arriving batch jobs immediately without temporal shifting.',
+            status: 'planned',
+            completedAt: null,
+            completedBy: null,
+            assignedTo: 'Kumkum Gupta',
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: 'task-w5-6-2',
+            phaseId: 'w5-6',
+            title: 'Earliest Deadline First (EDF) scheduler',
+            description: 'Implement priority-queue reference policy sorting workloads strictly by deadline urgency.',
+            status: 'planned',
+            completedAt: null,
+            completedBy: null,
+            assignedTo: 'Kumkum Gupta',
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: 'task-w5-6-3',
+            phaseId: 'w5-6',
+            title: 'Cost-Aware scheduling algorithm',
+            description: 'Implement price-minimizing reference scheduler exploiting diurnal spot price arbitrage.',
+            status: 'planned',
+            completedAt: null,
+            completedBy: null,
+            assignedTo: 'Kumkum Gupta',
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: 'task-w5-6-4',
+            phaseId: 'w5-6',
+            title: 'Realized-Data Oracle upper-bound solver',
+            description: 'Reference mathematical benchmark with omniscient knowledge of ground-truth future carbon realizations.',
+            status: 'planned',
+            completedAt: null,
+            completedBy: null,
+            assignedTo: 'Kumkum Gupta',
+            createdAt: now,
+            updatedAt: now,
+          },
+        ];
+      case 'w7-8':
+        return [
+          {
+            id: 'task-w7-8-1',
+            phaseId: 'w7-8',
+            title: 'Deterministic carbon-aware scheduling algorithm',
+            description: 'Implement carbon intensity window optimizer minimizing total gCO2 under deterministic point forecasts.',
+            status: 'planned',
+            completedAt: null,
+            completedBy: null,
+            assignedTo: 'Kumkum Gupta',
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: 'task-w7-8-2',
+            phaseId: 'w7-8',
+            title: 'Multi-region spatial workload shifting strategies',
+            description: 'Heuristic cross-region migration module shifting jobs to cleaner geographic grid zones.',
+            status: 'planned',
+            completedAt: null,
+            completedBy: null,
+            assignedTo: 'Yuvika Nagpal',
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: 'task-w7-8-3',
+            phaseId: 'w7-8',
+            title: 'Trace alignment and grid intensity ingestion parser',
+            description: 'Ingest and standardize 5-minute carbon intensity traces across multiple grid operators.',
+            status: 'planned',
+            completedAt: null,
+            completedBy: null,
+            assignedTo: 'Yuvika Nagpal',
+            createdAt: now,
+            updatedAt: now,
+          },
+        ];
+      case 'w9-10':
+        return [
+          {
+            id: 'task-w9-10-1',
+            phaseId: 'w9-10',
+            title: 'Forecast uncertainty and error modelling engine',
+            description: 'Model forecast error distributions across 1h to 48h look-ahead horizons capturing variance growth.',
+            status: 'planned',
+            completedAt: null,
+            completedBy: null,
+            assignedTo: 'Kumkum Gupta',
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: 'task-w9-10-2',
+            phaseId: 'w9-10',
+            title: 'Empirical multi-horizon error distribution models',
+            description: 'Fit parametric and empirical error distributions against historical day-ahead forecast vs actuals.',
+            status: 'planned',
+            completedAt: null,
+            completedBy: null,
+            assignedTo: 'Yuvika Nagpal',
+            createdAt: now,
+            updatedAt: now,
+          },
+        ];
+      case 'w11-12':
+        return [
+          {
+            id: 'task-w11-12-1',
+            phaseId: 'w11-12',
+            title: 'Uncertainty-aware scheduler enforcing P(violation) <= tau',
+            description: 'Core CarbonRoute scheduling algorithm optimizing carbon while bounding deadline violation risk.',
+            status: 'planned',
+            completedAt: null,
+            completedBy: null,
+            assignedTo: 'Kumkum Gupta',
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: 'task-w11-12-2',
+            phaseId: 'w11-12',
+            title: 'Deadline-risk calibration module (Brier Score & Reliability Diagrams)',
+            description: 'Probability calibration measuring Brier score and Reliability Diagrams to ensure sharpness.',
+            status: 'planned',
+            completedAt: null,
+            completedBy: null,
+            assignedTo: 'Kumkum Gupta',
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: 'task-w11-12-3',
+            phaseId: 'w11-12',
+            title: 'Expected Calibration Error (ECE) metric calculator',
+            description: 'Quantify miscalibration across probability bins to prevent overconfident delay decisions.',
+            status: 'planned',
+            completedAt: null,
+            completedBy: null,
+            assignedTo: 'Kumkum Gupta',
+            createdAt: now,
+            updatedAt: now,
+          },
+        ];
+      case 'w13':
+        return [
+          {
+            id: 'task-w13-1',
+            phaseId: 'w13',
+            title: 'Renewable drop-off stress testing scenarios',
+            description: 'Subject scheduling policies to severe solar/wind drop-offs and test fallback behaviors.',
+            status: 'planned',
+            completedAt: null,
+            completedBy: null,
+            assignedTo: 'Yuvika Nagpal',
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: 'task-w13-2',
+            phaseId: 'w13',
+            title: 'Cloud capacity contention and spot preemption tests',
+            description: 'Simulate regional compute saturation and evaluate deadline recovery effectiveness.',
+            status: 'planned',
+            completedAt: null,
+            completedBy: null,
+            assignedTo: 'Yuvika Nagpal',
+            createdAt: now,
+            updatedAt: now,
+          },
+        ];
+      case 'w14':
+        return [
+          {
+            id: 'task-w14-1',
+            phaseId: 'w14',
+            title: 'FastAPI REST decision endpoints exposure',
+            description: 'Expose REST endpoints for submitting batch workloads and retrieving scheduling decisions.',
+            status: 'planned',
+            completedAt: null,
+            completedBy: null,
+            assignedTo: 'Aaneya Sabharwal',
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: 'task-w14-2',
+            phaseId: 'w14',
+            title: 'Interactive scheduling dashboard and risk curve visualizer',
+            description: 'Web dashboard integration for visualizing schedules, tail risk bounds, and regional curves.',
+            status: 'planned',
+            completedAt: null,
+            completedBy: null,
+            assignedTo: 'Aaneya Sabharwal',
+            createdAt: now,
+            updatedAt: now,
+          },
+        ];
+      case 'w15':
+        return [
+          {
+            id: 'task-w15-1',
+            phaseId: 'w15',
+            title: 'Large-scale repeated benchmark suite execution',
+            description: 'Run automated repeated multi-seed evaluations across multiple grid regions and error profiles.',
+            status: 'planned',
+            completedAt: null,
+            completedBy: null,
+            assignedTo: 'Kumkum Gupta',
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: 'task-w15-2',
+            phaseId: 'w15',
+            title: 'Paired statistical significance tests',
+            description: 'Compute Student t-tests and Wilcoxon signed-rank tests confirming CarbonRoute advantages.',
+            status: 'planned',
+            completedAt: null,
+            completedBy: null,
+            assignedTo: 'Kumkum Gupta',
+            createdAt: now,
+            updatedAt: now,
+          },
+        ];
+      case 'w16':
+        return [
+          {
+            id: 'task-w16-1',
+            phaseId: 'w16',
+            title: 'Containerized Kubernetes Job workload connector',
+            description: 'Integrate connector dispatching scheduled batch jobs to Kubernetes Jobs with telemetry.',
+            status: 'planned',
+            completedAt: null,
+            completedBy: null,
+            assignedTo: 'Aaneya Sabharwal',
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: 'task-w16-2',
+            phaseId: 'w16',
+            title: 'End-to-end containerized runner verification',
+            description: 'Smoke test end-to-end container execution, completion polling, and emission accounting.',
+            status: 'planned',
+            completedAt: null,
+            completedBy: null,
+            assignedTo: 'Aaneya Sabharwal',
+            createdAt: now,
+            updatedAt: now,
+          },
+        ];
+      case 'w17':
+        return [
+          {
+            id: 'task-w17-1',
+            phaseId: 'w17',
+            title: 'Final project thesis and comprehensive technical documentation',
+            description: 'Complete final project report, architectural diagrams, empirical analysis, and defense thesis.',
+            status: 'planned',
+            completedAt: null,
+            completedBy: null,
+            assignedTo: 'Yuvika Nagpal',
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: 'task-w17-2',
+            phaseId: 'w17',
+            title: 'University semester defense presentation and demo',
+            description: 'Deliver final semester viva defense presentation with live interactive demonstration.',
+            status: 'planned',
+            completedAt: null,
+            completedBy: null,
+            assignedTo: 'Kumkum Gupta',
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: 'task-w17-3',
+            phaseId: 'w17',
+            title: 'Release artifact packaging and open-source publication',
+            description: 'Publish final GitHub repository with documentation, reproduction scripts, and MIT license.',
+            status: 'planned',
+            completedAt: null,
+            completedBy: null,
+            assignedTo: 'Aaneya Sabharwal',
+            createdAt: now,
+            updatedAt: now,
+          },
+        ];
+      default:
+        return [];
+    }
+  }
+
   getRoadmapMilestones(): RoadmapMilestone[] {
     return [...this.data.roadmapMilestones].sort((a, b) => a.displayOrder - b.displayOrder);
+  }
+
+  getRoadmapMilestoneById(id: string): RoadmapMilestone | undefined {
+    return this.data.roadmapMilestones.find((m) => m.id === id);
   }
 
   updateRoadmapMilestone(id: string, updates: Partial<RoadmapMilestone>): RoadmapMilestone | null {
@@ -624,6 +1064,141 @@ class JsonDatabase {
     };
     this.saveDatabase();
     return this.data.roadmapMilestones[idx];
+  }
+
+  getTaskById(taskId: string): { task: RoadmapTask; milestone: RoadmapMilestone } | null {
+    for (const milestone of this.data.roadmapMilestones) {
+      if (!milestone.tasks) continue;
+      const task = milestone.tasks.find((t) => t.id === taskId);
+      if (task) {
+        return { task, milestone };
+      }
+    }
+    return null;
+  }
+
+  updateRoadmapTask(
+    taskId: string,
+    updates: Partial<RoadmapTask>,
+    performedBy: string = 'System'
+  ): { task: RoadmapTask; milestone: RoadmapMilestone } | null {
+    for (let mIdx = 0; mIdx < this.data.roadmapMilestones.length; mIdx++) {
+      const milestone = this.data.roadmapMilestones[mIdx];
+      if (!milestone.tasks) continue;
+
+      const tIdx = milestone.tasks.findIndex((t) => t.id === taskId);
+      if (tIdx !== -1) {
+        const existingTask = milestone.tasks[tIdx];
+        const now = new Date().toISOString();
+
+        const updatedTask: RoadmapTask = {
+          ...existingTask,
+          ...updates,
+          updatedAt: now,
+        };
+
+        // If marked completed and completedAt is not set, set it to today (YYYY-MM-DD)
+        if (updatedTask.status === 'completed' && !updatedTask.completedAt) {
+          updatedTask.completedAt = now.split('T')[0];
+        }
+
+        // If marked completed and completedBy is not set, use performedBy if not System
+        if (updatedTask.status === 'completed' && !updatedTask.completedBy) {
+          updatedTask.completedBy = performedBy !== 'System' ? performedBy : 'Team Member';
+        }
+
+        // If moved away from completed, clear completion details unless explicitly provided
+        if (existingTask.status === 'completed' && updatedTask.status !== 'completed' && updates.completedAt === undefined) {
+          updatedTask.completedAt = null;
+        }
+
+        milestone.tasks[tIdx] = updatedTask;
+
+        // Auto-update parent milestone status based on task completion
+        const allCompleted = milestone.tasks.every((t) => t.status === 'completed');
+        const anyActive = milestone.tasks.some((t) => t.status === 'completed' || t.status === 'in-progress');
+
+        if (allCompleted && milestone.tasks.length > 0) {
+          milestone.status = 'completed';
+        } else if (anyActive) {
+          milestone.status = 'in-progress';
+        } else {
+          milestone.status = 'planned';
+        }
+
+        this.addAuditLog(
+          'UPDATE_ROADMAP_TASK',
+          'RoadmapTask',
+          taskId,
+          `Task "${updatedTask.title}" in ${milestone.weekRange} updated to ${updatedTask.status}`,
+          performedBy
+        );
+
+        this.saveDatabase();
+        return { task: updatedTask, milestone };
+      }
+    }
+    return null;
+  }
+
+  addTask(
+    phaseId: string,
+    taskData: Omit<RoadmapTask, 'id' | 'phaseId' | 'createdAt' | 'updatedAt'>,
+    performedBy: string = 'System'
+  ): { task: RoadmapTask; milestone: RoadmapMilestone } | null {
+    const milestone = this.data.roadmapMilestones.find((m) => m.id === phaseId);
+    if (!milestone) return null;
+
+    if (!milestone.tasks) {
+      milestone.tasks = [];
+    }
+
+    const now = new Date().toISOString();
+    const newTask: RoadmapTask = {
+      id: `task-${phaseId}-${uuidv4().substring(0, 8)}`,
+      phaseId,
+      title: taskData.title,
+      description: taskData.description || '',
+      status: taskData.status || 'planned',
+      completedAt: taskData.completedAt || (taskData.status === 'completed' ? now.split('T')[0] : null),
+      completedBy: taskData.completedBy || (taskData.status === 'completed' ? performedBy : null),
+      assignedTo: taskData.assignedTo || null,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    milestone.tasks.push(newTask);
+
+    this.addAuditLog(
+      'CREATE_ROADMAP_TASK',
+      'RoadmapTask',
+      newTask.id,
+      `Task "${newTask.title}" added to ${milestone.weekRange}`,
+      performedBy
+    );
+
+    this.saveDatabase();
+    return { task: newTask, milestone };
+  }
+
+  deleteTask(taskId: string, performedBy: string = 'System'): boolean {
+    for (const milestone of this.data.roadmapMilestones) {
+      if (!milestone.tasks) continue;
+      const tIdx = milestone.tasks.findIndex((t) => t.id === taskId);
+      if (tIdx !== -1) {
+        const [deleted] = milestone.tasks.splice(tIdx, 1);
+        this.addAuditLog(
+          'DELETE_ROADMAP_TASK',
+          'RoadmapTask',
+          taskId,
+          `Task "${deleted.title}" deleted from ${milestone.weekRange}`,
+          performedBy
+        );
+        this.saveDatabase();
+        return true;
+      }
+    }
+    return false;
   }
 
   // Activity Log

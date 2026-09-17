@@ -16,7 +16,15 @@ import {
   deleteResource,
 } from '../controllers/resourceController';
 import { getTeam, updateTeamMember } from '../controllers/teamController';
-import { getRoadmap, updateRoadmapMilestone } from '../controllers/roadmapController';
+import {
+  getRoadmap,
+  getRoadmapTask,
+  updateRoadmapTask,
+  markTaskCompleted,
+  createRoadmapTask,
+  deleteRoadmapTask,
+  updateRoadmapMilestone,
+} from '../controllers/roadmapController';
 import { serveFile } from '../controllers/storageController';
 import { simulateFeasibilityDecision } from '../controllers/schedulerController';
 import {
@@ -32,7 +40,7 @@ import {
   recordExperiment,
   getExperiments,
 } from '../controllers/prototypeController';
-import { authenticateToken, requireAdmin, optionalAuth } from '../middleware/auth';
+import { authenticateToken, requireAdmin, requireTeamMemberOrAdmin, optionalAuth } from '../middleware/auth';
 import { uploadMiddleware } from '../middleware/upload';
 import { db } from '../models/db';
 
@@ -89,7 +97,12 @@ router.put('/team/:id', authenticateToken, requireAdmin, updateTeamMember);
 
 // Project Roadmap Routes
 router.get('/roadmap', getRoadmap);
-router.put('/roadmap/:id', authenticateToken, requireAdmin, updateRoadmapMilestone);
+router.get('/roadmap/tasks/:id', getRoadmapTask);
+router.put('/roadmap/tasks/:id', authenticateToken, requireTeamMemberOrAdmin, updateRoadmapTask);
+router.patch('/roadmap/tasks/:id/complete', authenticateToken, requireTeamMemberOrAdmin, markTaskCompleted);
+router.post('/roadmap/phases/:phaseId/tasks', authenticateToken, requireTeamMemberOrAdmin, createRoadmapTask);
+router.delete('/roadmap/tasks/:id', authenticateToken, requireTeamMemberOrAdmin, deleteRoadmapTask);
+router.put('/roadmap/:id', authenticateToken, requireTeamMemberOrAdmin, updateRoadmapMilestone);
 
 // Feasibility Simulation Demonstration API
 router.post('/scheduler/simulate', simulateFeasibilityDecision);

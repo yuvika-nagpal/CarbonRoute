@@ -57,6 +57,24 @@ export const requireAdmin = (req: AuthRequest, res: Response, next: NextFunction
   next();
 };
 
+export const requireTeamMemberOrAdmin = (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (!req.user) {
+    return res.status(401).json({
+      success: false,
+      message: 'Access denied. Authentication required to modify roadmap tasks.',
+    });
+  }
+
+  if (req.user.role !== 'admin' && req.user.role !== 'student') {
+    return res.status(403).json({
+      success: false,
+      message: 'Forbidden. Only authorized team members and administrators can modify roadmap tasks.',
+    });
+  }
+
+  next();
+};
+
 export const optionalAuth = (req: AuthRequest, res: Response, next: NextFunction) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;

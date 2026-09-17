@@ -76,6 +76,21 @@ export interface TeamMember {
   displayOrder: number;
 }
 
+export type TaskStatus = 'planned' | 'in-progress' | 'completed' | 'blocked';
+
+export interface RoadmapTask {
+  id: string;
+  phaseId: string;
+  title: string;
+  description: string;
+  status: TaskStatus;
+  completedAt?: string | null;
+  completedBy?: string | null;
+  assignedTo?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface RoadmapMilestone {
   id: string;
   phaseNumber?: number;
@@ -86,6 +101,7 @@ export interface RoadmapMilestone {
   status: 'completed' | 'in-progress' | 'planned';
   dependencies?: string[];
   deliverables: string[];
+  tasks?: RoadmapTask[];
   startDate?: string;
   targetDate?: string;
   displayOrder: number;
